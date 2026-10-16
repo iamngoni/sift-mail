@@ -6,5 +6,6 @@
 
 pub mod brand;
 pub mod domain;
+pub mod store;
 pub mod theme;
 pub mod ui;

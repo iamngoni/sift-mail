@@ -4,13 +4,25 @@
 // Release builds on Windows are GUI apps with no console window behind them.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+use std::rc::Rc;
+
 fn main() {
+    let store = match sift_mail::ui::open_default_store() {
+        Ok(store) => Rc::new(store),
+        Err(error) => {
+            eprintln!(
+                "{}: could not open the mail store: {error}",
+                sift_mail::brand::PRODUCT_NAME
+            );
+            std::process::exit(1);
+        }
+    };
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
-        .run(|cx| {
+        .run(move |cx| {
             gpui_kit::init(cx);
             sift_mail::ui::quit_when_last_window_closes(cx);
-            if let Err(error) = sift_mail::ui::open_main_window(cx) {
+            if let Err(error) = sift_mail::ui::open_main_window(store, cx) {
                 eprintln!(
                     "{}: could not open the main window: {error:#}",
                     sift_mail::brand::PRODUCT_NAME

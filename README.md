@@ -4,9 +4,14 @@ A calm, fast, keyboard-first desktop email client for Windows, macOS and Linux,
 built in Rust on [GPUI Kit](https://gpui-kit.com) (Zed's GPUI plus Longbridge's
 component library).
 
-> **Status: early.** The app shell, theme and domain types are in place.
-> Account connection (Microsoft 365, Google, iCloud, IMAP) is the next piece, so
-> there is no mail to show yet.
+> **Status: early.** The inbox works end to end against a local SQLite store:
+> views, day sections, reading threads, Done, Snooze, read/unread and Undo, all
+> from the keyboard. Account sync (IMAP, then Microsoft 365 and Google) is next,
+> so a normal build starts empty. Try it with sample mail:
+>
+> ```sh
+> SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
+> ```
 
 ## Naming
 
@@ -31,12 +36,33 @@ src/
     mod.rs       turns tokens into the GPUI Kit theme; light, dark, match system
   domain/
     email.rs     EmailAddress, parsed once at the boundary
+    message.rs   messages, threads, contacts, triage state
+    triage.rs    rule-based sorting into views
+    time.rs      day sections, short timestamps, snooze times
     provider.rs  provider detection and sign-in method
     view.rs      the inbox views shown as tabs
+  store/
+    mod.rs       SQLite mail store: threads, counts, triage actions, undo
+    schema.rs    migrations (PRAGMA user_version)
+    demo.rs      sample mail, only with --features demo and in tests
   ui/
-    mod.rs       window options and opening the main window
-    app.rs       title bar, view tabs, empty state, floating toolbar
+    mod.rs       window options, opening the store and the main window
+    app.rs       inbox state and actions, keyboard handling
+    render.rs    title bar, list, reader, snooze menu, toasts
 ```
+
+## Keyboard
+
+| Key | Action |
+| --- | --- |
+| `1`–`6` | Switch view |
+| `J` / `K` or arrows | Next / previous thread |
+| `Enter` / `O` | Open thread |
+| `Esc` | Back to the list, or close the snooze menu |
+| `E` | Done |
+| `S`, then `1`–`3` | Snooze: later today, tomorrow, next week |
+| `U` | Toggle read |
+| `Z` | Undo |
 
 Design tokens come from the approved style spec. Change colours, radii, spacing
 or type in `src/theme/tokens.rs` and both GPUI Kit components and Sift's own
