@@ -92,6 +92,7 @@ src/
     send.rs      send flow: SMTP, Sent copy, local copy, thread done; read write-back
     secrets.rs   passwords in the OS credential store
     service.rs   background sync with its own database connection
+    freebusy.rs  other people's busy times from Microsoft Graph and Google Calendar
   ui/
     mod.rs       window options, opening the store and the main window
     app.rs       inbox state and actions, keyboard handling
@@ -173,7 +174,8 @@ Sift then talks to the normal IMAP and SMTP servers with XOAUTH2.
 2. Platform: *Mobile and desktop applications*, redirect URI `http://127.0.0.1/callback`
    (the port is chosen at run time; Entra ignores it for loopback addresses).
 3. API permissions → Add → *APIs my organization uses* → **Office 365 Exchange Online**:
-   `IMAP.AccessAsUser.All`, `SMTP.Send`; plus Microsoft Graph `offline_access`, `openid`, `email`, `profile`.
+   `IMAP.AccessAsUser.All`, `SMTP.Send`; plus Microsoft Graph `offline_access`, `openid`, `email`, `profile`
+   and `Calendars.Read.Shared` (for Find a time).
 4. Build with the Application (client) ID:
 
 ```sh
@@ -187,7 +189,8 @@ screen, which offers a ready-made request for the IT team (they approve it under
 **Google** (Google Cloud console → APIs & Services → Credentials):
 
 1. Create an OAuth client ID of type **Desktop app**.
-2. On the OAuth consent screen, add the scope `https://mail.google.com/` and your
+2. Enable the Google Calendar API. On the OAuth consent screen, add the scopes
+   `https://mail.google.com/` and `https://www.googleapis.com/auth/calendar.freebusy`, and your
    address as a test user (Google reviews this scope before public release).
 3. Build with both values:
 
@@ -204,9 +207,12 @@ works with every provider: invites that arrive by mail appear on the calendar,
 Accept / Maybe / Decline send a proper reply to the organizer from your own
 account, and invites you send go out the same way. Open it from the calendar
 button in the title bar. Click an empty slot to add an event; Find a time reads
-requests like "30 min with Priya next week" and offers free times from your own
-calendar (Sift can't see other people's calendars over IMAP), which you can hold
-and then send as an invite. Keys: `←` `→` weeks, `T` today, `N` new event, `Esc`.
+requests like "30 min with Priya next week" and offers free times straight away
+from your own calendar, then asks your provider when the other people are busy
+(Microsoft Graph `getSchedule` for Microsoft 365, the Calendar `freeBusy` API for
+Google; busy blocks only, never titles) and re-ranks to times you're both free.
+Password accounts can't see other calendars, and Find a time says so. Hold a
+time, then send it as an invite. Keys: `←` `→` weeks, `T` today, `N` new event, `Esc`.
 
 Set `SIFT_OPEN=calendar` (or `settings`) to start on that screen.
 

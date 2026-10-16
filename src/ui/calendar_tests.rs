@@ -508,3 +508,91 @@ fn answers_and_invites_go_out_by_mail(cx: &mut TestAppContext) {
     }
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }
+
+#[gpui_kit::test]
+fn find_a_time_reranks_with_the_other_calendar(cx: &mut TestAppContext) {
+    use super::calendar::Others;
+    use crate::domain::schedule::Busy;
+    let (handle, view) = open(cx, true);
+    click(cx, handle, "open-calendar");
+    let search = read(cx, &view, |a| {
+        a.calendar.as_ref().unwrap().search.clone().unwrap()
+    });
+    assert_eq!(
+        search.others,
+        Others::Unknown,
+        "no sync service, nobody to ask"
+    );
+    // Priya is busy all week except Friday.
+    let busy: Vec<Busy> = search.days[..search.days.len() - 1]
+        .iter()
+        .map(|d| Busy {
+            start: d.and_hms_opt(0, 0, 0).unwrap(),
+            end: d.and_hms_opt(23, 59, 0).unwrap(),
+        })
+        .collect();
+    let friday = *search.days.last().unwrap();
+    view.update(cx, |app, cx| {
+        app.calendar
+            .as_mut()
+            .unwrap()
+            .search
+            .as_mut()
+            .unwrap()
+            .others = Others::Busy(busy);
+        app.show_offers(cx);
+    });
+    let (summary, offers, _) = read(cx, &view, |a| {
+        a.calendar.as_ref().unwrap().offers.clone().unwrap()
+    });
+    assert!(summary.contains("avoid both calendars"), "{summary}");
+    assert!(offers.iter().all(|o| o.start.date() == friday));
+    assert!(
+        offers[0]
+            .note
+            .starts_with("You and Priya Raman are both free")
+    );
+
+    for (others, says) in [
+        (Others::Checking, "Checking Priya Raman's calendar"),
+        (
+            Others::Failed("no access".into()),
+            "couldn't be checked (no access)",
+        ),
+    ] {
+        view.update(cx, |app, cx| {
+            app.calendar
+                .as_mut()
+                .unwrap()
+                .search
+                .as_mut()
+                .unwrap()
+                .others = others;
+            app.show_offers(cx);
+        });
+        let (summary, offers, _) = read(cx, &view, |a| {
+            a.calendar.as_ref().unwrap().offers.clone().unwrap()
+        });
+        assert!(summary.contains(says), "{summary}");
+        assert!(offers[0].note.starts_with("You're free"));
+    }
+}
+
+#[gpui_kit::test]
+fn find_a_time_asks_the_provider_when_it_can(cx: &mut TestAppContext) {
+    let db = temp_db("calendar-freebusy");
+    let (handle, view) = open_synced_pub(cx, &db);
+    add_account(cx, handle, &view);
+    click(cx, handle, "open-calendar");
+    cx.run_until_parked();
+    let search = read(cx, &view, |a| {
+        a.calendar.as_ref().unwrap().search.clone().unwrap()
+    });
+    if !search.people.is_empty() {
+        assert!(
+            matches!(search.others, super::calendar::Others::Failed(_)),
+            "a password account can't see other calendars: {:?}",
+            search.others
+        );
+    }
+}

@@ -5,6 +5,7 @@
 //! pass over every IMAP account; the UI calls it on a background thread with
 //! its own store connection.
 
+pub mod freebusy;
 pub mod imap;
 pub mod parse;
 pub mod secrets;

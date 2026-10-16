@@ -73,6 +73,9 @@ pub struct OAuthConfig {
     pub client_secret: Option<String>,
     /// Space-separated scopes.
     pub scopes: String,
+    /// Scopes asked for at consent but not in token requests: permissions for
+    /// another service (Microsoft issues one token per service).
+    pub consent_only: String,
 }
 
 /// Environment variable for the Microsoft client ID.
@@ -121,6 +124,7 @@ impl OAuthConfig {
                          https://outlook.office.com/IMAP.AccessAsUser.All \
                          https://outlook.office.com/SMTP.Send"
                     .into(),
+                consent_only: crate::sync::freebusy::GRAPH_SCOPE.into(),
             }),
             Provider::Google => Ok(Self {
                 provider,
@@ -131,7 +135,11 @@ impl OAuthConfig {
                     variable: GOOGLE_CLIENT_ID,
                 })?,
                 client_secret: settings(GOOGLE_CLIENT_SECRET),
-                scopes: "openid email profile https://mail.google.com/".into(),
+                scopes: format!(
+                    "openid email profile https://mail.google.com/ {}",
+                    crate::sync::freebusy::GOOGLE_SCOPE
+                ),
+                consent_only: String::new(),
             }),
             Provider::ICloud | Provider::Imap => Err(OAuthError::Provider(
                 "this provider signs in with a password".into(),
@@ -184,7 +192,15 @@ pub fn authorize_url(
     q.append_pair("client_id", &config.client_id)
         .append_pair("response_type", "code")
         .append_pair("redirect_uri", redirect_uri)
-        .append_pair("scope", &config.scopes)
+        .append_pair(
+            "scope",
+            &[config.scopes.as_str(), config.consent_only.as_str()]
+                .iter()
+                .filter(|s| !s.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
         .append_pair("state", &pkce.state)
         .append_pair("code_challenge", &pkce.challenge)
         .append_pair("code_challenge_method", "S256");

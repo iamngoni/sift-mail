@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
+use super::freebusy::CalendarHttp;
 use super::imap::{MailSession, MailboxInfo, RawMessage, SyncError, connect};
 use super::secrets::Refreshing;
 use super::secrets::Secrets;
@@ -17,7 +18,7 @@ use super::smtp::{Sender, smtp_sender};
 use super::{AddAccountRequest, add_imap_account, add_oauth_account, remove_account, sync_some};
 use crate::domain::{AccountId, EmailAddress, Provider};
 use crate::domain::{ImapSettings, ThreadRef};
-use crate::oauth::{self, OAuthConfig, OAuthError, ReqwestHttp, SignedIn};
+use crate::oauth::{self, OAuthConfig, OAuthError, ReqwestHttp, SignedIn, Tokens};
 use crate::store::{Account, MailStore};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -69,6 +70,21 @@ pub struct SyncService {
     connector: Connector,
     sender: Sender,
     signer: Signer,
+    calendar_http: CalendarHttp,
+    graph_token: GraphToken,
+}
+
+/// Trades an account's saved sign-in for a Microsoft Graph token.
+pub type GraphToken = Arc<dyn Fn(&Tokens) -> Result<String, SyncError> + Send + Sync>;
+
+/// The real Graph token exchange: a refresh asking for the calendar permission.
+pub fn graph_token() -> GraphToken {
+    Arc::new(|tokens: &Tokens| {
+        let mut config = OAuthConfig::for_provider(Provider::Microsoft365)?;
+        config.scopes = format!("offline_access {}", super::freebusy::GRAPH_SCOPE);
+        let fresh = oauth::refresh(&ReqwestHttp::new()?, &config, tokens, Utc::now())?;
+        Ok(fresh.access_token)
+    })
 }
 
 /// Runs a browser sign-in: provider, optional address hint, a callback that
@@ -120,6 +136,16 @@ impl SyncService {
             connector,
             sender,
             signer: browser_signer(),
+            calendar_http: Arc::new(|_, _, _| {
+                Err(SyncError::Protocol(
+                    "calendars aren't reachable in this session".into(),
+                ))
+            }),
+            graph_token: Arc::new(|_| {
+                Err(SyncError::Protocol(
+                    "calendars aren't reachable in this session".into(),
+                ))
+            }),
         }
     }
 
@@ -136,6 +162,51 @@ impl SyncService {
         });
         let secrets: Arc<dyn Secrets> = Arc::new(Refreshing::networked(secrets));
         Self::new(db_path, secrets, connector, smtp_sender())
+            .with_calendars(super::freebusy::networked_http(), graph_token())
+    }
+
+    /// Replaces how other people's calendars are reached, for tests.
+    pub fn with_calendars(mut self, http: CalendarHttp, graph_token: GraphToken) -> Self {
+        self.calendar_http = http;
+        self.graph_token = graph_token;
+        self
+    }
+
+    /// Busy times for `people` between `from` and `to`, asked of `account`'s
+    /// provider. Only browser-signed-in Microsoft 365 and Google accounts can.
+    /// Blocking; run off the UI thread.
+    pub fn free_busy(
+        &self,
+        account: AccountId,
+        people: &[EmailAddress],
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<super::freebusy::PersonBusy>, SyncError> {
+        let store = MailStore::open(&self.db_path)?;
+        let (account, imap, _) = store
+            .imap_account(account)?
+            .ok_or_else(|| SyncError::Protocol("that account isn't set up".into()))?;
+        if imap.auth != crate::domain::AuthMethod::OAuth {
+            return Err(SyncError::Protocol(
+                "this account can't see other people's calendars".into(),
+            ));
+        }
+        let (url, body) = super::freebusy::request(account.provider, people, from, to)?;
+        let token = match account.provider {
+            Provider::Microsoft365 => {
+                let saved = self
+                    .secrets
+                    .get(&super::token_key(&account.email))?
+                    .ok_or(SyncError::NoPassword)?;
+                let tokens: Tokens = serde_json::from_str(&saved).map_err(|_| {
+                    SyncError::Protocol("saved sign-in is unreadable; sign in again".into())
+                })?;
+                (self.graph_token)(&tokens)?
+            }
+            _ => super::secret_for(self.secrets.as_ref(), &account, &imap, Utc::now())?,
+        };
+        let (status, answer) = (self.calendar_http)(url, &token, &body)?;
+        super::freebusy::parse(account.provider, status, &answer)
     }
 
     /// Signs in through the browser and saves the account. Blocking; run off
