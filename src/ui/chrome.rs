@@ -198,6 +198,14 @@ impl SiftApp {
         }
     }
 
+    /// Whether a view gets a tab, given the sort mode and chosen views.
+    pub fn tab_shown(&self, view: TriageView) -> bool {
+        match self.sort_mode {
+            crate::domain::choices::SortMode::Plain => view == TriageView::All,
+            crate::domain::choices::SortMode::Views => self.views.shows(view),
+        }
+    }
+
     /// Whether the sidebar is showing.
     pub fn sidebar_open(&self) -> bool {
         self.sidebar

@@ -418,6 +418,7 @@ impl SiftApp {
         let views: Vec<AnyElement> = TriageView::ALL
             .into_iter()
             .enumerate()
+            .filter(|(_, v)| self.tab_shown(*v))
             .map(|(i, view)| {
                 item(
                     ("sidebar-view", i).into(),

@@ -1,6 +1,7 @@
 //! Mail domain types. Untrusted text is parsed into these once, at the edge;
 //! everything past that point can rely on the invariants they carry.
 
+pub mod choices;
 pub mod email;
 pub mod message;
 pub mod outgoing;

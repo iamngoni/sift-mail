@@ -8,6 +8,8 @@ mod app;
 mod chrome;
 mod chrome_view;
 mod compose;
+mod onboarding;
+mod onboarding_view;
 mod render;
 mod settings;
 mod settings_view;
@@ -16,6 +18,8 @@ mod settings_view;
 mod add_account_tests;
 #[cfg(test)]
 mod chrome_tests;
+#[cfg(test)]
+mod onboarding_tests;
 #[cfg(test)]
 mod settings_tests;
 #[cfg(test)]

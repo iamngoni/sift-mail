@@ -22,7 +22,9 @@ use crate::sync::service::SyncService;
 use super::add_account::AddAccountFlow;
 use super::chrome::Overlay;
 use super::compose::ComposeForm;
+use super::onboarding::Onboarding;
 use super::settings::SettingsState;
+use crate::domain::choices::{AiFeatures, Checkins, NotifyMode, SortMode, ViewSet};
 
 /// The thread currently open in the reader.
 pub(crate) struct OpenThread {
@@ -92,6 +94,13 @@ pub struct SiftApp {
     pub(crate) settings: Option<SettingsState>,
     /// Compact rows.
     pub(crate) compact: bool,
+    /// First-run onboarding, while it shows.
+    pub(crate) onboarding: Option<Onboarding>,
+    pub(crate) sort_mode: SortMode,
+    pub(crate) views: ViewSet,
+    pub(crate) ai_features: AiFeatures,
+    pub(crate) notify_mode: NotifyMode,
+    pub(crate) checkins: Checkins,
 }
 
 impl SiftApp {
@@ -138,9 +147,17 @@ impl SiftApp {
             opener: |path| open::that_detached(path),
             settings: None,
             compact: false,
+            onboarding: None,
+            sort_mode: SortMode::default(),
+            views: ViewSet::default(),
+            ai_features: AiFeatures::default(),
+            notify_mode: NotifyMode::default(),
+            checkins: Checkins::default(),
         };
         app.load_preferences(window, cx);
+        app.load_choices();
         app.reload();
+        app.maybe_onboard();
         app.schedule_sync(cx);
         app
     }
@@ -487,6 +504,12 @@ impl SiftApp {
             .reply_box
             .as_ref()
             .is_some_and(|b| b.read(cx).focus_handle(cx).is_focused(window));
+        if self.form.is_none() && self.onboarding.is_some() {
+            if self.onboarding_key(event, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         if keystroke.modifiers.secondary()
             && key == "k"
             && self.form.is_none()
@@ -559,7 +582,10 @@ impl SiftApp {
                 (_, Some(d)) if d >= 1 => self.choose_snooze(usize::from(d - 1), cx),
                 _ => return,
             }
-        } else if let Some(view) = digit.and_then(TriageView::from_shortcut) {
+        } else if let Some(view) = digit
+            .and_then(TriageView::from_shortcut)
+            .filter(|v| self.tab_shown(*v))
+        {
             self.select(view, cx);
         } else if let Some(d) = digit.filter(|d| *d >= 7) {
             let Some(id) = self.custom_views.get(usize::from(d - 7)).map(|v| v.id) else {
