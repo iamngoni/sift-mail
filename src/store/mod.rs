@@ -5,7 +5,17 @@
 //! touches more than one row runs in a transaction, and triage actions apply to
 //! whole threads so a conversation is never half done.
 
+mod files;
+mod prefs;
 mod schema;
+mod search;
+
+pub use files::{Attachment, safe_name};
+pub use prefs::{
+    ACCOUNT_COLOURS, AccountSettings, CustomView, CustomViewId, NotifyLevel, Pref, SyncRange,
+    describe_view,
+};
+pub use search::{SEARCH_LIMIT, fts_query};
 
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
@@ -38,6 +48,14 @@ pub enum StoreError {
         /// Why it failed.
         source: std::io::Error,
     },
+    /// An attachment could not be written to disk.
+    #[error("could not save {path}: {source}")]
+    WriteFile {
+        /// The file we tried to write.
+        path: PathBuf,
+        /// Why it failed.
+        source: std::io::Error,
+    },
     /// A row held a value this version cannot read, such as an unknown view.
     #[error("stored data is not readable by this version: {0}")]
     Corrupt(String),
@@ -57,6 +75,8 @@ pub struct Account {
     pub email: EmailAddress,
     /// Where it lives.
     pub provider: Provider,
+    /// Index into the avatar tints.
+    pub colour: u8,
 }
 
 /// What to list.
@@ -176,7 +196,9 @@ impl MailStore {
         provider: Provider,
     ) -> StoreResult<Account> {
         self.conn.execute(
-            "INSERT INTO accounts (name, email, provider) VALUES (?1, ?2, ?3)
+            "INSERT INTO accounts (name, email, provider, position, colour)
+             SELECT ?1, ?2, ?3, COALESCE(MAX(position), -1) + 1, COUNT(*) % 6 FROM accounts
+             WHERE true
              ON CONFLICT(email) DO NOTHING",
             params![name, email.as_str(), provider_key(provider)],
         )?;
@@ -193,16 +215,25 @@ impl MailStore {
     pub fn account(&self, id: AccountId) -> StoreResult<Option<Account>> {
         self.conn
             .query_row(
-                "SELECT id, name, email, provider FROM accounts WHERE id = ?1",
+                "SELECT id, name, email, provider, colour FROM accounts WHERE id = ?1",
                 [id.0],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()?
             .map(
-                |(id, name, email, provider): (i64, String, String, String)| {
+                |(id, name, email, provider, colour): (i64, String, String, String, i64)| {
                     Ok(Account {
                         id: AccountId(id),
                         name,
+                        colour: u8::try_from(colour.rem_euclid(6)).unwrap_or_default(),
                         email: parse_email(&email)?,
                         provider: provider_from_key(&provider)?,
                     })
@@ -213,7 +244,9 @@ impl MailStore {
 
     /// Every account, oldest first.
     pub fn accounts(&self) -> StoreResult<Vec<Account>> {
-        let mut stmt = self.conn.prepare("SELECT id FROM accounts ORDER BY id")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM accounts ORDER BY position, id")?;
         let ids: Vec<i64> = stmt
             .query_map([], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
@@ -343,7 +376,7 @@ impl MailStore {
              FROM ranked
              WHERE rn = 1
                AND (?1 IS NULL OR view = ?1)
-               AND (?2 IS NULL OR account_id = ?2)
+               AND (account_id = ?2 OR (?2 IS NULL AND account_id IN (SELECT id FROM accounts WHERE in_all)))
                AND (?3 = 0 OR all_read = 0)
              ORDER BY received_at DESC, id DESC
              LIMIT ?4",
@@ -368,7 +401,8 @@ impl MailStore {
                 SELECT view, ROW_NUMBER() OVER (PARTITION BY account_id, thread_key
                                                ORDER BY received_at DESC, id DESC) AS rn
                 FROM messages
-                WHERE state = 'inbox' AND (?1 IS NULL OR account_id = ?1)
+                WHERE state = 'inbox'
+                  AND (account_id = ?1 OR (?1 IS NULL AND account_id IN (SELECT id FROM accounts WHERE in_all)))
              )
              SELECT view, COUNT(*) FROM latest WHERE rn = 1 GROUP BY view",
         )?;

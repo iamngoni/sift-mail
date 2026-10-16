@@ -22,7 +22,7 @@ fn main() {
         }
     };
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(sift_mail::assets::SiftAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
             sift_mail::ui::quit_when_last_window_closes(cx);

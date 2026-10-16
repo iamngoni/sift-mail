@@ -51,6 +51,49 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE imap_accounts ADD COLUMN smtp_port INTEGER;",
     // 4: how each account signs in (password or OAuth).
     "ALTER TABLE imap_accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';",
+    // 5: search, custom views, preferences, per-account settings, attachments.
+    "CREATE VIRTUAL TABLE messages_fts USING fts5(
+        subject, from_name, from_email, body_text,
+        content='messages', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
+     );
+     INSERT INTO messages_fts(rowid, subject, from_name, from_email, body_text)
+        SELECT id, subject, coalesce(from_name, ''), from_email, body_text FROM messages;
+     CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, subject, from_name, from_email, body_text)
+        VALUES (new.id, new.subject, coalesce(new.from_name, ''), new.from_email, new.body_text);
+     END;
+     CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, subject, from_name, from_email, body_text)
+        VALUES ('delete', old.id, old.subject, coalesce(old.from_name, ''), old.from_email, old.body_text);
+     END;
+     CREATE TABLE preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+     CREATE TABLE custom_views (
+        id INTEGER PRIMARY KEY,
+        label TEXT NOT NULL,
+        terms TEXT NOT NULL
+     );
+     CREATE TABLE aliases (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        address TEXT NOT NULL,
+        PRIMARY KEY (account_id, address)
+     );
+     CREATE TABLE attachments (
+        id INTEGER PRIMARY KEY,
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        path TEXT
+     );
+     CREATE INDEX attachments_message ON attachments (message_id);
+     ALTER TABLE accounts ADD COLUMN colour INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE accounts ADD COLUMN signature TEXT NOT NULL DEFAULT '';
+     ALTER TABLE accounts ADD COLUMN in_all INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE accounts ADD COLUMN notify TEXT NOT NULL DEFAULT 'needs_you';
+     ALTER TABLE accounts ADD COLUMN ai INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE accounts ADD COLUMN sync_days INTEGER NOT NULL DEFAULT 90;
+     ALTER TABLE accounts ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+     UPDATE accounts SET position = id;",
 ];
 
 /// Brings `conn` up to the latest schema.

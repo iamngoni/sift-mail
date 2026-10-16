@@ -99,6 +99,36 @@ pub const DARK: Palette = Palette {
     danger: Rgb::from_u32(0xFF8A7A),
 };
 
+/// Account avatar tints, light appearance: (background, text). Accounts pick
+/// one by index so two inboxes are easy to tell apart.
+pub const AVATARS_LIGHT: [(Rgb, Rgb); 6] = [
+    (Rgb::from_u32(0xF1F0FA), Rgb::from_u32(0x5B44B8)),
+    (Rgb::from_u32(0xE6F4EC), Rgb::from_u32(0x1F6B42)),
+    (Rgb::from_u32(0xFDEEE3), Rgb::from_u32(0x9A4413)),
+    (Rgb::from_u32(0xE5F0FB), Rgb::from_u32(0x1D5C99)),
+    (Rgb::from_u32(0xFBE9EF), Rgb::from_u32(0xA3264F)),
+    (Rgb::from_u32(0xF0F0F2), Rgb::from_u32(0x3F3F46)),
+];
+
+/// Account avatar tints, dark appearance.
+pub const AVATARS_DARK: [(Rgb, Rgb); 6] = [
+    (Rgb::from_u32(0x2A2545), Rgb::from_u32(0xC9BFFF)),
+    (Rgb::from_u32(0x1C3328), Rgb::from_u32(0x8EDDB0)),
+    (Rgb::from_u32(0x3A2618), Rgb::from_u32(0xF6BC92)),
+    (Rgb::from_u32(0x1A2C40), Rgb::from_u32(0x9CC8F5)),
+    (Rgb::from_u32(0x3B1E29), Rgb::from_u32(0xF5A3BE)),
+    (Rgb::from_u32(0x26262B), Rgb::from_u32(0xC8C8CE)),
+];
+
+/// The avatar tints for `palette`.
+pub fn avatar_tints(palette: &Palette) -> &'static [(Rgb, Rgb); 6] {
+    if *palette == DARK {
+        &AVATARS_DARK
+    } else {
+        &AVATARS_LIGHT
+    }
+}
+
 /// Spacing steps on the 4 px grid. These are the only allowed gaps and paddings.
 pub const SPACE: [f32; 8] = [2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0];
 
@@ -212,6 +242,16 @@ mod tests {
             let bg = palette.bg.relative_luminance();
             for surface in [palette.bg_hover, palette.bg_active, palette.line] {
                 assert_ne!(surface.relative_luminance(), bg);
+            }
+        }
+    }
+
+    #[test]
+    fn avatar_tints_are_readable() {
+        for (palette, tints) in [(LIGHT, &AVATARS_LIGHT), (DARK, &AVATARS_DARK)] {
+            assert_eq!(avatar_tints(&palette), tints);
+            for (bg, fg) in tints {
+                assert!(fg.contrast(*bg) >= AA, "{fg:?} on {bg:?}");
             }
         }
     }

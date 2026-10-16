@@ -12,18 +12,27 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::{Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, Window};
 
 use crate::domain::time::{SnoozeOption, snooze_options};
-use crate::domain::{ThreadRef, TriageState, TriageView};
-use crate::store::{MailStore, MessageDetail, ThreadQuery, ThreadSummary, ViewCounts};
+use crate::domain::{AccountId, MessageId, ThreadRef, TriageState, TriageView};
+use crate::store::{
+    Account, Attachment, CustomView, CustomViewId, MailStore, MessageDetail, StoreResult,
+    ThreadQuery, ThreadSummary, ViewCounts,
+};
 use crate::sync::service::SyncService;
 
 use super::accounts::AddAccountForm;
+use super::chrome::Overlay;
 use super::compose::ComposeForm;
 
 /// The thread currently open in the reader.
 pub(crate) struct OpenThread {
     pub(crate) summary: ThreadSummary,
     pub(crate) messages: Vec<MessageDetail>,
+    /// Attachments per message, in the same order.
+    pub(crate) files: Vec<Vec<Attachment>>,
 }
+
+/// Opens a saved attachment with the system's default app.
+pub(crate) type Opener = fn(&std::path::Path) -> std::io::Result<()>;
 
 /// The message at the bottom of the window after an action.
 pub(crate) struct Toast {
@@ -60,6 +69,24 @@ pub struct SiftApp {
     pub(crate) sending: bool,
     /// The New message dialog, while open.
     pub(crate) compose: Option<ComposeForm>,
+    /// The account the inbox is filtered to; `None` is All inboxes.
+    pub(crate) account: Option<AccountId>,
+    /// Connected accounts, in sidebar order.
+    pub(crate) accounts: Vec<Account>,
+    /// Saved custom views, shown as extra tabs.
+    pub(crate) custom_views: Vec<CustomView>,
+    /// The custom view on screen, if one is.
+    pub(crate) custom: Option<CustomViewId>,
+    /// Threads ticked for a bulk action.
+    pub(crate) selected: Vec<ThreadRef>,
+    /// The open dialog or popover.
+    pub(crate) overlay: Option<Overlay>,
+    pub(crate) sidebar: bool,
+    pub(crate) summaries: bool,
+    pub(crate) hold: bool,
+    /// Earlier messages the user expanded in the open thread.
+    pub(crate) expanded: Vec<MessageId>,
+    pub(crate) opener: Opener,
 }
 
 impl SiftApp {
@@ -93,7 +120,19 @@ impl SiftApp {
             reply_error: None,
             sending: false,
             compose: None,
+            account: None,
+            accounts: Vec::new(),
+            custom_views: Vec::new(),
+            custom: None,
+            selected: Vec::new(),
+            overlay: None,
+            sidebar: false,
+            summaries: false,
+            hold: false,
+            expanded: Vec::new(),
+            opener: |path| open::that_detached(path),
         };
+        app.load_preferences(window, cx);
         app.reload();
         app.schedule_sync(cx);
         app
@@ -136,28 +175,65 @@ impl SiftApp {
 
     /// Re-reads the list and counts from the store, waking due snoozes first.
     pub(crate) fn reload(&mut self) {
-        let query = ThreadQuery {
-            view: self.view,
-            account: None,
-            unread_only: self.unread_only,
-        };
-        let result = self
-            .store
-            .wake_snoozed(Utc::now())
-            .and_then(|_| Ok((self.store.threads(query)?, self.store.counts(None)?)));
-        match result {
-            Ok((threads, counts)) => {
-                self.threads = threads;
-                self.counts = counts;
-                self.error = None;
-            }
+        match self.load() {
+            Ok(()) => self.error = None,
             Err(error) => self.error = Some(format!("Sift couldn't read your mail: {error}")),
         }
         self.cursor = self.cursor.min(self.threads.len().saturating_sub(1));
+        let threads = &self.threads;
+        self.selected
+            .retain(|s| threads.iter().any(|t| t.thread == *s));
+    }
+
+    fn load(&mut self) -> StoreResult<()> {
+        self.store.wake_snoozed(Utc::now())?;
+        self.accounts = self.store.accounts()?;
+        if self
+            .account
+            .is_some_and(|id| !self.accounts.iter().any(|a| a.id == id))
+        {
+            self.account = None;
+        }
+        self.custom_views = self.store.custom_views()?;
+        let custom = self
+            .custom
+            .and_then(|id| self.custom_views.iter().find(|v| v.id == id));
+        self.threads = match custom {
+            Some(view) => {
+                let mut threads = self.store.custom_view_threads(&view.terms, self.account)?;
+                if self.unread_only {
+                    threads.retain(|t| t.unread);
+                }
+                threads
+            }
+            None => {
+                self.custom = None;
+                self.store.threads(ThreadQuery {
+                    view: self.view,
+                    account: self.account,
+                    unread_only: self.unread_only,
+                })?
+            }
+        };
+        self.counts = self.store.counts(self.account)?;
+        Ok(())
+    }
+
+    /// The custom view on screen, if one is.
+    pub(crate) fn current_custom(&self) -> Option<&CustomView> {
+        self.custom
+            .and_then(|id| self.custom_views.iter().find(|v| v.id == id))
+    }
+
+    /// The title of what's listed: a view or a custom view.
+    pub fn list_title(&self) -> String {
+        self.current_custom()
+            .map_or_else(|| self.view.label().to_owned(), |v| v.label.clone())
     }
 
     /// Selects an inbox view and returns to the list.
     pub fn select(&mut self, view: TriageView, cx: &mut Context<Self>) {
+        self.custom = None;
         self.view = view;
         self.cursor = 0;
         self.open = None;
@@ -193,6 +269,14 @@ impl SiftApp {
             return;
         };
         self.cursor = index;
+        self.open_summary(summary, cx);
+    }
+
+    /// Opens a thread, listed or not (search finds done mail too), and marks it read.
+    pub(crate) fn open_summary(&mut self, summary: ThreadSummary, cx: &mut Context<Self>) {
+        if let Some(index) = self.threads.iter().position(|t| t.thread == summary.thread) {
+            self.cursor = index;
+        }
         let opened = self
             .store
             .set_read(&summary.thread, true)
@@ -209,8 +293,17 @@ impl SiftApp {
                 {
                     self.reply_box = None;
                     self.reply_error = None;
+                    self.expanded.clear();
                 }
-                self.open = Some(OpenThread { summary, messages });
+                let files = messages
+                    .iter()
+                    .map(|m| self.store.attachments(m.id).unwrap_or_default())
+                    .collect();
+                self.open = Some(OpenThread {
+                    summary,
+                    messages,
+                    files,
+                });
                 self.reload();
             }
             Err(error) => self.error = Some(format!("Sift couldn't open that thread: {error}")),
@@ -232,17 +325,55 @@ impl SiftApp {
             .or_else(|| self.threads.get(self.cursor).map(|t| t.thread.clone()))
     }
 
-    /// Marks the target thread done, with undo.
+    /// What a bulk-capable action applies to: the ticked threads when the list
+    /// is showing, else the target thread.
+    fn targets(&self) -> Vec<ThreadRef> {
+        if self.open.is_none() && !self.selected.is_empty() {
+            self.selected.clone()
+        } else {
+            self.target().into_iter().collect()
+        }
+    }
+
+    /// Marks the target threads done, with undo.
     pub fn mark_done(&mut self, cx: &mut Context<Self>) {
-        if let Some(thread) = self.target() {
+        let threads = self.targets();
+        if !threads.is_empty() {
+            let text = match threads.len() {
+                1 => "Marked done".to_owned(),
+                n => format!("{n} conversations marked done"),
+            };
+            self.apply(threads, TriageState::Done, text, cx);
+        }
+    }
+
+    /// Marks one listed thread done, from its row.
+    pub fn mark_row_done(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(t) = self.threads.get(index) {
+            let thread = t.thread.clone();
             self.apply(vec![thread], TriageState::Done, "Marked done".into(), cx);
         }
     }
 
+    /// Opens the snooze menu for one listed thread, from its row.
+    pub fn snooze_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(t) = self.threads.get(index) {
+            self.snoozing = Some((vec![t.thread.clone()], snooze_options(Utc::now(), &Local)));
+            cx.notify();
+        }
+    }
+
+    /// Flips read state of one listed thread, from its row.
+    pub fn toggle_row_read(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.cursor = index.min(self.threads.len().saturating_sub(1));
+        self.toggle_read(cx);
+    }
+
     /// Opens the snooze menu for the target thread.
     pub fn start_snooze(&mut self, cx: &mut Context<Self>) {
-        if let Some(thread) = self.target() {
-            self.snoozing = Some((vec![thread], snooze_options(Utc::now(), &Local)));
+        let threads = self.targets();
+        if !threads.is_empty() {
+            self.snoozing = Some((threads, snooze_options(Utc::now(), &Local)));
             cx.notify();
         }
     }
@@ -349,6 +480,29 @@ impl SiftApp {
             .reply_box
             .as_ref()
             .is_some_and(|b| b.read(cx).focus_handle(cx).is_focused(window));
+        if keystroke.modifiers.secondary()
+            && key == "k"
+            && self.form.is_none()
+            && self.compose.is_none()
+        {
+            self.toggle_palette(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.overlay.is_some() {
+            // The palette and New view boxes take typing; Escape closes.
+            if key == "escape" {
+                self.close_overlay(window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        let typed = keystroke.key_char.as_deref().unwrap_or(key);
+        if typed == "?" && self.form.is_none() && self.compose.is_none() && !replying {
+            self.toggle_overlay("shortcuts", cx);
+            cx.stop_propagation();
+            return;
+        }
         if keystroke.modifiers.modified() {
             return;
         }
@@ -375,6 +529,11 @@ impl SiftApp {
             }
         } else if let Some(view) = digit.and_then(TriageView::from_shortcut) {
             self.select(view, cx);
+        } else if let Some(d) = digit.filter(|d| *d >= 7) {
+            let Some(id) = self.custom_views.get(usize::from(d - 7)).map(|v| v.id) else {
+                return;
+            };
+            self.select_custom(id, cx);
         } else {
             match key {
                 "j" | "down" => self.move_cursor(1, cx),
@@ -387,6 +546,15 @@ impl SiftApp {
                 "z" => self.undo(cx),
                 "r" if self.open.is_some() => self.focus_reply(window, cx),
                 "c" => self.open_compose(window, cx),
+                "x" if self.open.is_none() => {
+                    if let Some(t) = self.threads.get(self.cursor) {
+                        self.toggle_select(t.thread.clone(), cx);
+                    }
+                }
+                "/" => self.toggle_palette(window, cx),
+                "a" => self.set_summaries(!self.summaries, cx),
+                "[" => self.toggle_sidebar(cx),
+                "escape" if !self.selected.is_empty() => self.clear_selection(cx),
                 _ => return,
             }
         }

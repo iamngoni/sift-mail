@@ -164,7 +164,7 @@ pub fn seed(store: &MailStore, now: DateTime<Utc>) -> StoreResult<bool> {
     let address = parse_email("you@company.com")?;
     let account = store.add_account("Work", &address, Provider::Microsoft365)?;
     for sample in SAMPLES {
-        store.upsert(&IncomingMessage {
+        let id = store.upsert(&IncomingMessage {
             account: account.id,
             remote_id: sample.remote.into(),
             thread_key: sample.thread.into(),
@@ -178,6 +178,21 @@ pub fn seed(store: &MailStore, now: DateTime<Utc>) -> StoreResult<bool> {
             message_id: Some(format!("{}@demo.sift", sample.remote)),
             references: Vec::new(),
         })?;
+        if sample.attachments {
+            let name = if sample.subject.contains("budget") {
+                "Q4-headcount-template.xlsx"
+            } else {
+                "Vendor-agreement-v3.pdf"
+            };
+            store.save_attachments(
+                id,
+                &[crate::sync::parse::AttachmentData {
+                    name: name.into(),
+                    mime: "application/octet-stream".into(),
+                    bytes: vec![0; 48 * 1024],
+                }],
+            )?;
+        }
     }
     Ok(true)
 }

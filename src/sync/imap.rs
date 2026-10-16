@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::parse::{Envelope, parse};
+use super::parse::{Envelope, attachments, parse};
 use crate::domain::{AuthMethod, EmailAddress, ImapSettings, SyncCursor};
 use crate::store::{Account, MailStore, StoreError};
 
@@ -140,7 +140,10 @@ pub fn sync_inbox(
             };
             match parse(&raw.body, &envelope) {
                 Ok(message) => {
-                    store.upsert(&message)?;
+                    let id = store.upsert(&message)?;
+                    if message.has_attachments {
+                        store.save_attachments(id, &attachments(&raw.body))?;
+                    }
                     report.stored += 1;
                 }
                 Err(_) => report.skipped += 1,

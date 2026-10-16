@@ -12,7 +12,7 @@ use crate::domain::TriageView;
 use crate::store::{MailStore, demo};
 use crate::theme::{Appearance, SiftTheme};
 
-fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, Entity<SiftApp>) {
+pub(super) fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, Entity<SiftApp>) {
     cx.update(|cx| {
         gpui_kit::init(cx);
         let store = MailStore::open_in_memory().unwrap();
@@ -25,7 +25,7 @@ fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, Entity<SiftA
     })
 }
 
-fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &[&str]) {
+pub(super) fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &[&str]) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         for key in keys {
@@ -35,7 +35,11 @@ fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &[&str]) {
     .unwrap();
 }
 
-fn click(cx: &mut TestAppContext, handle: AnyWindowHandle, id: impl Into<gpui_kit::ElementId>) {
+pub(super) fn click(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    id: impl Into<gpui_kit::ElementId>,
+) {
     let id = id.into();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -44,7 +48,11 @@ fn click(cx: &mut TestAppContext, handle: AnyWindowHandle, id: impl Into<gpui_ki
     .unwrap();
 }
 
-fn read<R>(cx: &mut TestAppContext, view: &Entity<SiftApp>, f: impl FnOnce(&SiftApp) -> R) -> R {
+pub(super) fn read<R>(
+    cx: &mut TestAppContext,
+    view: &Entity<SiftApp>,
+    f: impl FnOnce(&SiftApp) -> R,
+) -> R {
     view.read_with(cx, |app, _| f(app))
 }
 
@@ -405,6 +413,7 @@ mod sync_ui {
             Some("Up to date".into())
         );
 
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         assert!(read(cx, &view, SiftApp::is_adding_account));
         // Typing in the dialog must not trigger inbox shortcuts.
@@ -450,9 +459,11 @@ mod sync_ui {
     fn the_dialog_closes_with_cancel_or_escape(cx: &mut TestAppContext) {
         let db = temp_db("cancel");
         let (handle, view) = open_synced(cx, &db);
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         click(cx, handle, "cancel-add");
         assert!(!read(cx, &view, SiftApp::is_adding_account));
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         press(cx, handle, &["escape"]);
         assert!(!read(cx, &view, SiftApp::is_adding_account));
@@ -463,6 +474,7 @@ mod sync_ui {
     fn without_a_sync_service_accounts_cannot_be_saved(cx: &mut TestAppContext) {
         let (handle, view) = open(cx, false);
         assert!(read(cx, &view, |a| a.sync_status().is_none() && !a.is_syncing()));
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         fill(cx, handle, &view, "you@fastmail.com", "right", "");
         click(cx, handle, "connect");
@@ -476,6 +488,7 @@ mod compose_ui {
     use super::*;
 
     fn add_account(cx: &mut TestAppContext, handle: AnyWindowHandle, view: &Entity<SiftApp>) {
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         sync_ui_fill(cx, handle, view, "you@fastmail.com", "right", "");
         click(cx, handle, "connect");
@@ -709,6 +722,7 @@ mod oauth_ui {
             }
         });
         let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         click(cx, handle, "signin-microsoft");
         assert!(read(cx, &view, SiftApp::is_waiting_for_browser));
@@ -731,6 +745,7 @@ mod oauth_ui {
         let signer: crate::sync::service::Signer =
             Arc::new(|_, _, _| Err(OAuthError::AdminApprovalRequired));
         let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         click(cx, handle, "signin-google");
         cx.run_until_parked();
@@ -758,6 +773,7 @@ mod oauth_ui {
             }
         });
         let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         click(cx, handle, "signin-microsoft");
         click(cx, handle, "cancel-oauth");
@@ -783,6 +799,7 @@ mod oauth_ui {
     #[gpui_kit::test]
     fn without_a_service_sign_in_explains(cx: &mut TestAppContext) {
         let (handle, view) = open(cx, false);
+        click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         click(cx, handle, "signin-microsoft");
         assert!(read(cx, &view, |a| a
