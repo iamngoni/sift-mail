@@ -1,0 +1,5 @@
+# Production code may not unwrap, expect or panic (see Cargo.toml lints).
+# Tests may: a failed unwrap there is the assertion.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

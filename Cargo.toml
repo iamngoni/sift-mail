@@ -1,0 +1,60 @@
+[package]
+name = "sift-mail"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Sift Mail: a calm, fast, keyboard-first desktop email client."
+repository = "https://github.com/iamngoni/sift-mail"
+publish = false
+
+[lib]
+name = "sift_mail"
+path = "src/lib.rs"
+
+# The Windows executable ships as SiftMail.exe; the same name is used on every platform.
+[[bin]]
+name = "SiftMail"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "=0.7.3"
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+gpui-kit = { version = "=0.7.3", features = ["test-support"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Installers are built by cargo-packager in the release workflow.
+[package.metadata.packager]
+product-name = "Sift Mail"
+identifier = "io.github.iamngoni.siftmail"
+category = "Productivity"
+description = "A calm, fast, keyboard-first desktop email client."
+copyright = "Copyright 2026 Sift Mail contributors"
+before-packaging-command = "cargo build --release --locked"
+out-dir = "target/packages"
+binaries = [{ path = "SiftMail", main = true }]
+
+[package.metadata.packager.windows]
+allow-downgrades = false
+
+[package.metadata.packager.nsis]
+install-mode = "currentUser"
+
+[package.metadata.packager.macos]
+minimum-system-version = "12.0"

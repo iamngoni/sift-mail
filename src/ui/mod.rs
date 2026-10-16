@@ -1,0 +1,60 @@
+//! Windows and views. [`open_main_window`] is the only way the app opens UI,
+//! so tests exercise exactly what users see.
+
+mod app;
+
+pub use app::SiftApp;
+
+use gpui_kit::component::TitleBar;
+use gpui_kit::{
+    App, AppContext as _, Bounds, Result, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+};
+
+use crate::brand;
+use crate::theme::{self, Appearance};
+
+/// Default window size on first launch, in logical pixels.
+pub const DEFAULT_SIZE: (f32, f32) = (1280.0, 820.0);
+/// Smallest size the layout is designed for.
+pub const MIN_SIZE: (f32, f32) = (720.0, 480.0);
+
+/// Window options for the main window: our own title bar, the formal product
+/// name as the OS window title, and the designed default and minimum sizes.
+pub fn main_window_options(cx: &App) -> WindowOptions {
+    let base = TitleBar::window_options();
+    WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some(brand::PRODUCT_NAME.into()),
+            ..TitleBar::title_bar_options()
+        }),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(DEFAULT_SIZE.0), px(DEFAULT_SIZE.1)),
+            cx,
+        ))),
+        window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
+        app_id: Some(brand::EXECUTABLE_NAME.into()),
+        ..base
+    }
+}
+
+/// Installs the theme and opens the main window. Call once, after `gpui_kit::init`.
+pub fn open_main_window(cx: &mut App) -> Result<gpui_kit::Entity<SiftApp>> {
+    theme::install(Appearance::System, cx)?;
+    let options = main_window_options(cx);
+    let (_, view) = gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| SiftApp::new(window, cx))
+    })?;
+    Ok(view)
+}
+
+/// Quits when the last window closes. GPUI keeps running without one on
+/// Windows and Linux otherwise, which leaves an invisible process behind.
+pub fn quit_when_last_window_closes(cx: &mut App) {
+    cx.on_window_closed(|cx, _| {
+        if cx.windows().is_empty() {
+            cx.quit();
+        }
+    })
+    .detach();
+}
