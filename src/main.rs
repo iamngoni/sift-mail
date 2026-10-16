@@ -29,12 +29,19 @@ fn main() {
             let sync = store
                 .path()
                 .map(|path| SyncService::networked(path.to_path_buf(), Arc::new(Keychain)));
-            if let Err(error) = sift_mail::ui::open_main_window(store, sync, cx) {
-                eprintln!(
-                    "{}: could not open the main window: {error:#}",
-                    sift_mail::brand::PRODUCT_NAME
-                );
-                cx.quit();
+            match sift_mail::ui::open_main_window(store, sync, cx) {
+                Ok(view) => {
+                    if let Ok(screen) = std::env::var(sift_mail::ui::OPEN_ENV) {
+                        sift_mail::ui::open_start_screen(&view, &screen, cx);
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "{}: could not open the main window: {error:#}",
+                        sift_mail::brand::PRODUCT_NAME
+                    );
+                    cx.quit();
+                }
             }
         });
 }

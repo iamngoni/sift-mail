@@ -67,8 +67,7 @@ fn a_password_account_goes_through_every_step(cx: &mut TestAppContext) {
     assert_eq!(step(cx, &view), Some(Step::Choose), "nothing typed yet");
     set_flow_field(cx, handle, &view, |f| f.email.clone(), "you@fastmail.com");
     press(cx, handle, &["enter"]);
-    click(cx, handle, "continue-email");
-    assert_eq!(step(cx, &view), Some(Step::Imap));
+    assert_eq!(step(cx, &view), Some(Step::Imap), "Enter continues");
     let host = cx.update(|cx| {
         view.read(cx)
             .form

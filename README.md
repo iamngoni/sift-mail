@@ -44,6 +44,8 @@ src/
     tokens.rs    the design tokens from the style spec (single source of truth)
     mod.rs       turns tokens into the GPUI Kit theme; light, dark, match system
   domain/
+    ical.rs      reading invitations and writing iMIP requests and replies
+    schedule.rs  weeks, free time, and reading "find a time" requests
     choices.rs   onboarding choices: sort mode, views, AI helpers, notifications
     email.rs     EmailAddress, parsed once at the boundary
     message.rs   messages, threads, contacts, triage state
@@ -57,6 +59,8 @@ src/
     search.rs    full-text search (FTS5) with user text kept out of query syntax
     prefs.rs     preferences, custom views, per-account settings, send-as aliases
     files.rs     attachments saved beside the database
+    events.rs    the calendar: invitations by UID and SEQUENCE, events made in Sift
+    memo.rs      cached AI answers and contact suggestions
     demo.rs      sample mail, only with --features demo and in tests
   ai/
     mod.rs       the Assistant trait; Claude Code and Codex as subprocesses
@@ -82,6 +86,8 @@ src/
     add_account_view.rs  how that flow looks
     onboarding.rs  first-run onboarding: welcome, six choices, summary
     onboarding_view.rs  how onboarding looks
+    calendar.rs  the Calendar and answering invitations
+    calendar_view.rs  the week grid, popovers and side panel
     settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
                  connection, removal), default From, appearance, notifications, keyboard
     settings_view.rs  how Settings looks
@@ -173,6 +179,19 @@ SIFT_GOOGLE_CLIENT_ID=… SIFT_GOOGLE_CLIENT_SECRET=… cargo build --release
 ```
 
 Google's "secret" for desktop apps is not confidential; Google requires it anyway.
+
+## Calendar
+
+The calendar is built from standard meeting invitations (iCalendar/iMIP), so it
+works with every provider: invites that arrive by mail appear on the calendar,
+Accept / Maybe / Decline send a proper reply to the organizer from your own
+account, and invites you send go out the same way. Open it from the calendar
+button in the title bar. Click an empty slot to add an event; Find a time reads
+requests like "30 min with Priya next week" and offers free times from your own
+calendar (Sift can't see other people's calendars over IMAP), which you can hold
+and then send as an invite. Keys: `←` `→` weeks, `T` today, `N` new event, `Esc`.
+
+Set `SIFT_OPEN=calendar` (or `settings`) to start on that screen.
 
 ## AI
 

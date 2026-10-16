@@ -5,12 +5,14 @@
 //! touches more than one row runs in a transaction, and triage actions apply to
 //! whole threads so a conversation is never half done.
 
+mod events;
 mod files;
 mod memo;
 mod prefs;
 mod schema;
 mod search;
 
+pub use events::{Event, EventId, EventKind, NewEvent};
 pub use files::{Attachment, safe_name};
 pub use memo::CONTACT_LIMIT;
 pub use prefs::{

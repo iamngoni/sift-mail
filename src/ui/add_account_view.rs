@@ -242,6 +242,7 @@ impl SiftApp {
         let privacy = matches!(flow.step, Step::Choose | Step::OAuth);
         div()
             .id("add-account-scrim")
+            .occlude()
             .absolute()
             .inset_0()
             .when(!flow.first_run, |s| s.bg(scrim()))

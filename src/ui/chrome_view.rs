@@ -201,6 +201,13 @@ impl SiftApp {
                     .test_support(),
             )
             .child(
+                icon_button("open-calendar", IconName::Calendar, false, p)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_calendar(window, cx);
+                    }))
+                    .test_support(),
+            )
+            .child(
                 icon_button("notifications", IconName::Bell, self.hold, p)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.toggle_overlay("notifications", cx);
@@ -482,12 +489,15 @@ impl SiftApp {
                                     .child(Local::now().format("%a %-d %b").to_string()),
                             ),
                     )
-                    .child(
-                        div()
-                            .text_size(px(text::META))
-                            .text_color(p.ink_3)
-                            .child("Nothing on your calendar today."),
-                    ),
+                    .children(self.today_agenda(p))
+                    .when(self.today_agenda(p).is_empty(), |d| {
+                        d.child(
+                            div()
+                                .text_size(px(text::META))
+                                .text_color(p.ink_3)
+                                .child("Nothing on your calendar today."),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -859,6 +869,7 @@ impl SiftApp {
         let popover = matches!(overlay, Overlay::Accounts | Overlay::Notifications);
         let layer = div()
             .id("overlay-scrim")
+            .occlude()
             .absolute()
             .inset_0()
             .flex()

@@ -7,6 +7,8 @@ mod add_account_view;
 mod ai_ui;
 mod ai_view;
 mod app;
+mod calendar;
+mod calendar_view;
 mod chrome;
 mod chrome_view;
 mod compose;
@@ -21,6 +23,8 @@ mod settings_view;
 mod add_account_tests;
 #[cfg(test)]
 mod ai_tests;
+#[cfg(test)]
+mod calendar_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]
@@ -112,4 +116,23 @@ pub fn quit_when_last_window_closes(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// Environment variable naming a screen to open at start, `calendar` or
+/// `settings`; useful for screenshots and documentation.
+pub const OPEN_ENV: &str = "SIFT_OPEN";
+
+/// Opens a named screen in the main window. Unknown names do nothing.
+pub fn open_start_screen(view: &gpui_kit::Entity<SiftApp>, screen: &str, cx: &mut App) {
+    let Some(window) = cx.windows().first().copied() else {
+        return;
+    };
+    // The window is the one just opened; a failure means it already closed.
+    let _ = window.update(cx, |_, window, cx| {
+        view.update(cx, |app, cx| match screen {
+            "calendar" => app.open_calendar(window, cx),
+            "settings" => app.open_settings(settings::SettingsPage::Accounts, window, cx),
+            _ => {}
+        });
+    });
 }

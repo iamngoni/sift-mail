@@ -510,3 +510,34 @@ fn sign_in_problems_are_told_apart() {
     assert!(!SyncError::OAuth(OAuthError::Network("offline".into())).needs_sign_in());
     assert!(!SyncError::Protocol("BAD".into()).needs_sign_in());
 }
+
+#[test]
+fn invitations_in_mail_land_on_the_calendar() {
+    let (store, account) = setup();
+    let mut session = FakeSession::with(7, []);
+    let invite = "From: Daniel <daniel@company.com>\r\nTo: you@company.com\r\nSubject: Invitation: Roadmap sync\r\n\
+Message-ID: <inv@x.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"b\"\r\n\r\n\
+--b\r\nContent-Type: text/plain\r\n\r\nRoadmap sync\r\n\
+--b\r\nContent-Type: text/calendar; method=REQUEST\r\n\r\nBEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n\
+UID:roadmap\r\nSUMMARY:Roadmap sync\r\nDTSTART:20261020T120000Z\r\nDTEND:20261020T123000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n--b--\r\n";
+    session.messages.insert(
+        1,
+        RawMessage {
+            uid: 1,
+            seen: false,
+            internal_date: Some(now()),
+            body: invite.as_bytes().to_vec(),
+        },
+    );
+    sync_inbox(&mut session, &store, &account, SyncCursor::default(), now()).unwrap();
+    let events = store
+        .events_between(now(), now() + chrono::Duration::days(7))
+        .unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].title, "Roadmap sync");
+    let thread = events[0].thread.clone().unwrap();
+    assert_eq!(
+        store.event_for_thread(&thread).unwrap().unwrap().uid,
+        "roadmap"
+    );
+}

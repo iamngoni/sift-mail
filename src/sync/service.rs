@@ -268,7 +268,7 @@ impl SyncService {
 }
 
 /// A random value for Message-IDs, from the OS-seeded hasher (no extra crate).
-fn rand_u64() -> u64 {
+pub fn rand_u64() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u128(

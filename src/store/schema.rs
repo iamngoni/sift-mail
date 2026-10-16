@@ -104,6 +104,25 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE accounts ADD COLUMN ready INTEGER NOT NULL DEFAULT 1;",
     // 8: AI answers, so a thread is summarised once.
     "CREATE TABLE ai_cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);",
+    // 9: the calendar.
+    "CREATE TABLE events (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        uid TEXT NOT NULL,
+        sequence INTEGER NOT NULL DEFAULT 0,
+        title TEXT NOT NULL,
+        starts_at TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        all_day INTEGER NOT NULL DEFAULT 0,
+        location TEXT,
+        organizer TEXT,
+        attendees TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL,
+        rsvp TEXT,
+        thread_key TEXT,
+        UNIQUE (account_id, uid)
+     );
+     CREATE INDEX events_time ON events (starts_at);",
 ];
 
 /// Brings `conn` up to the latest schema.
