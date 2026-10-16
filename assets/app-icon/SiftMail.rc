@@ -1,0 +1,2 @@
+// The app icon, as resource 1: GPUI loads that one for every window.
+1 ICON "SiftMail.ico"
