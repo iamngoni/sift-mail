@@ -1,0 +1,5 @@
+# Keep LF in the repository on every platform so diffs and rustfmt agree.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary

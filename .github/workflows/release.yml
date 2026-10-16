@@ -1,0 +1,126 @@
+# Builds Sift Mail installers for Linux x64, Windows x64 and macOS Apple
+# silicon (no Intel Macs), then publishes them as a GitHub release.
+# Trigger: push a tag like v0.1.0 that matches the version in Cargo.toml.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: [self-hosted, Linux, X64]
+            formats: deb,appimage
+            binary: SiftMail
+          - name: windows-x64
+            runner: [self-hosted, Windows, X64]
+            formats: nsis
+            binary: SiftMail.exe
+          - name: macos-arm64
+            runner: [self-hosted, macOS, ARM64]
+            formats: app,dmg
+            binary: SiftMail
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Refuse Intel on macOS
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "::error::macOS releases are Apple silicon only; this runner is $(uname -m)"
+            exit 1
+          fi
+
+      - name: Toolchain
+        run: rustup show active-toolchain
+
+      - name: Test
+        run: cargo test --all-targets --locked
+
+      - name: Install cargo-packager
+        run: command -v cargo-packager >/dev/null || cargo install cargo-packager --locked
+
+      - name: Build installers
+        # before-packaging-command in Cargo.toml runs `cargo build --release --locked`.
+        run: cargo packager --release --formats ${{ matrix.formats }}
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp -R target/packages/* dist/ 2>/dev/null || true
+          # Also ship the bare executable for people who don't want an installer.
+          archive="SiftMail-${TAG}-${{ matrix.name }}"
+          mkdir -p "$archive"
+          cp "target/release/${{ matrix.binary }}" "$archive/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            powershell -NoProfile -Command "Compress-Archive -Path '$archive' -DestinationPath 'dist/${archive}.zip' -Force"
+          else
+            tar -czf "dist/${archive}.tar.gz" "$archive"
+          fi
+          # Remove the unpacked .app directory; the .dmg carries it.
+          rm -rf dist/*.app
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sift-mail-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Sift Mail ${{ env.TAG }}
+          generate_release_notes: true
+          files: dist/*
