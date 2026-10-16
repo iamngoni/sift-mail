@@ -2,8 +2,14 @@
 //! so tests exercise exactly what users see.
 
 mod app;
+mod render;
+
+#[cfg(test)]
+mod tests;
 
 pub use app::SiftApp;
+
+use std::rc::Rc;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::{
@@ -11,6 +17,7 @@ use gpui_kit::{
 };
 
 use crate::brand;
+use crate::store::{MailStore, StoreResult};
 use crate::theme::{self, Appearance};
 
 /// Default window size on first launch, in logical pixels.
@@ -38,12 +45,32 @@ pub fn main_window_options(cx: &App) -> WindowOptions {
     }
 }
 
-/// Installs the theme and opens the main window. Call once, after `gpui_kit::init`.
-pub fn open_main_window(cx: &mut App) -> Result<gpui_kit::Entity<SiftApp>> {
+/// Environment variable that points the app at a different database file,
+/// so development and demo runs never touch real mail.
+pub const DB_PATH_ENV: &str = "SIFT_MAIL_DB";
+
+/// Opens the store at `SIFT_MAIL_DB` if set, else the default location. With
+/// the `demo` feature, an empty store is filled with sample mail so the inbox
+/// can be tried without an account.
+pub fn open_default_store() -> StoreResult<MailStore> {
+    let path = std::env::var_os(DB_PATH_ENV)
+        .filter(|p| !p.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(MailStore::default_path)
+        .unwrap_or_else(|| "sift-mail.db".into());
+    let store = MailStore::open(&path)?;
+    #[cfg(feature = "demo")]
+    crate::store::demo::seed(&store, chrono::Utc::now())?;
+    Ok(store)
+}
+
+/// Installs the theme and opens the main window over `store`. Call once,
+/// after `gpui_kit::init`.
+pub fn open_main_window(store: Rc<MailStore>, cx: &mut App) -> Result<gpui_kit::Entity<SiftApp>> {
     theme::install(Appearance::System, cx)?;
     let options = main_window_options(cx);
     let (_, view) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| SiftApp::new(window, cx))
+        cx.new(|cx| SiftApp::new(store, window, cx))
     })?;
     Ok(view)
 }

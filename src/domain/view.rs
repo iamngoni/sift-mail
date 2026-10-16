@@ -68,6 +68,23 @@ impl TriageView {
         // ALL has six entries, so this always fits in a u8.
         u8::try_from(index + 1).unwrap_or(u8::MAX)
     }
+
+    /// Stable storage key. Changing one is a schema migration.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::NeedsYou => "needs_you",
+            Self::Meetings => "meetings",
+            Self::Updates => "updates",
+            Self::Newsletters => "newsletters",
+            Self::Other => "other",
+        }
+    }
+
+    /// Reads a storage key written by [`TriageView::key`].
+    pub(crate) fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|view| view.key() == key)
+    }
 }
 
 #[cfg(test)]
@@ -82,6 +99,14 @@ mod tests {
         assert_eq!(TriageView::from_shortcut(0), None);
         assert_eq!(TriageView::from_shortcut(7), None);
         assert_eq!(TriageView::default(), TriageView::All);
+    }
+
+    #[test]
+    fn storage_keys_round_trip() {
+        for view in TriageView::ALL {
+            assert_eq!(TriageView::from_key(view.key()), Some(view));
+        }
+        assert_eq!(TriageView::from_key("inbox"), None);
     }
 
     #[test]

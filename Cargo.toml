@@ -8,6 +8,10 @@ license = "MIT"
 repository = "https://github.com/iamngoni/sift-mail"
 publish = false
 
+[features]
+# Seeds an empty store with sample mail. Development only; never in releases.
+demo = []
+
 [lib]
 name = "sift_mail"
 path = "src/lib.rs"
@@ -18,7 +22,10 @@ name = "SiftMail"
 path = "src/main.rs"
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+dirs = "6"
 gpui-kit = "=0.7.3"
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = "1"
 thiserror = "2"
 
