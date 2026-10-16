@@ -94,6 +94,12 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE accounts ADD COLUMN sync_days INTEGER NOT NULL DEFAULT 90;
      ALTER TABLE accounts ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
      UPDATE accounts SET position = id;",
+    // 6: what each account syncs, and how its last sync went.
+    "ALTER TABLE accounts ADD COLUMN sync_calendar INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE accounts ADD COLUMN sync_contacts INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE accounts ADD COLUMN last_sync TEXT;
+     ALTER TABLE accounts ADD COLUMN needs_sign_in INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE accounts ADD COLUMN last_error TEXT;",
 ];
 
 /// Brings `conn` up to the latest schema.

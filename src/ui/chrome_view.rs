@@ -14,6 +14,7 @@ use gpui_kit::{
 use super::app::SiftApp;
 use super::chrome::{Overlay, PaletteAction, SHORTCUTS, VIEW_IDEAS};
 use super::render::{kbd, scrim, view_icon};
+use super::settings::SettingsPage;
 use crate::assets::Lucide;
 use crate::domain::TriageView;
 use crate::domain::message::initials;
@@ -106,7 +107,7 @@ fn icon_button_at(
         .child(Icon::new(icon).size(px(14.0)))
 }
 
-fn small_button(
+pub(super) fn small_button(
     id: impl Into<gpui_kit::ElementId>,
     label: SharedString,
     p: &Palette,
@@ -1160,6 +1161,19 @@ impl SiftApp {
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.overlay = None;
                         this.open_add_account(window, cx);
+                    }))
+                    .test_support(),
+            )
+            .child(
+                entry("manage-accounts".into())
+                    .child(
+                        Icon::new(IconName::Settings)
+                            .size(px(16.0))
+                            .text_color(p.ink_3),
+                    )
+                    .child("Manage accounts")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_settings(SettingsPage::Accounts, window, cx);
                     }))
                     .test_support(),
             )

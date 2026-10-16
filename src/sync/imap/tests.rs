@@ -500,3 +500,13 @@ fn real_adapter_signs_in_with_an_oauth_token() {
         Err(SyncError::Auth)
     ));
 }
+
+#[test]
+fn sign_in_problems_are_told_apart() {
+    use crate::oauth::OAuthError;
+    assert!(SyncError::Auth.needs_sign_in());
+    assert!(SyncError::NoPassword.needs_sign_in());
+    assert!(SyncError::OAuth(OAuthError::Provider("invalid_grant".into())).needs_sign_in());
+    assert!(!SyncError::OAuth(OAuthError::Network("offline".into())).needs_sign_in());
+    assert!(!SyncError::Protocol("BAD".into()).needs_sign_in());
+}

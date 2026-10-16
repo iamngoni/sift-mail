@@ -83,6 +83,8 @@ pub enum Command {
     Shortcuts,
     /// Opens the Add account dialog.
     AddAccount,
+    /// Opens Settings.
+    Settings,
 }
 
 /// Example descriptions offered in the New view dialog.
@@ -112,7 +114,7 @@ pub const SHORTCUTS: [(&str, &str); 14] = [
 
 impl Command {
     /// Every command, in palette order.
-    pub const ALL: [Command; 10] = [
+    pub const ALL: [Command; 11] = [
         Self::NewMessage,
         Self::GoTo(TriageView::NeedsYou),
         Self::GoTo(TriageView::Meetings),
@@ -123,6 +125,7 @@ impl Command {
         Self::NewView,
         Self::Shortcuts,
         Self::AddAccount,
+        Self::Settings,
     ];
 
     /// The palette label, which reads as what will happen given the current state.
@@ -140,6 +143,7 @@ impl Command {
             Self::NewView => "Create a view…".into(),
             Self::Shortcuts => "Keyboard shortcuts".into(),
             Self::AddAccount => "Add account…".into(),
+            Self::Settings => "Settings".into(),
         }
     }
 
@@ -152,6 +156,7 @@ impl Command {
             Self::ToggleSummaries => "A",
             Self::ToggleSidebar => "[",
             Self::Shortcuts => "?",
+            Self::Settings => "Ctrl ,",
             _ => "",
         }
     }
@@ -166,6 +171,13 @@ impl SiftApp {
             .store
             .flag(Pref::HoldNotifications, false)
             .unwrap_or(false);
+        self.compact = self
+            .store
+            .preference(Pref::Density)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("compact");
         let appearance = self
             .store
             .preference(Pref::Appearance)
@@ -517,6 +529,9 @@ impl SiftApp {
             Command::NewView => self.open_new_view(window, cx),
             Command::Shortcuts => self.toggle_overlay("shortcuts", cx),
             Command::AddAccount => self.open_add_account(window, cx),
+            Command::Settings => {
+                self.open_settings(super::settings::SettingsPage::General, window, cx)
+            }
         }
     }
 
@@ -628,7 +643,10 @@ mod tests {
             "Go to Needs you"
         );
         let keys: Vec<_> = Command::ALL.iter().map(|c| c.key()).collect();
-        assert_eq!(keys, ["C", "2", "3", "A", "", "", "[", "", "?", ""]);
+        assert_eq!(
+            keys,
+            ["C", "2", "3", "A", "", "", "[", "", "?", "", "Ctrl ,"]
+        );
         for c in Command::ALL {
             assert!(!c.label(false, false, false).is_empty());
         }

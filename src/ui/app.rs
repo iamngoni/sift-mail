@@ -22,6 +22,7 @@ use crate::sync::service::SyncService;
 use super::accounts::AddAccountForm;
 use super::chrome::Overlay;
 use super::compose::ComposeForm;
+use super::settings::SettingsState;
 
 /// The thread currently open in the reader.
 pub(crate) struct OpenThread {
@@ -87,6 +88,10 @@ pub struct SiftApp {
     /// Earlier messages the user expanded in the open thread.
     pub(crate) expanded: Vec<MessageId>,
     pub(crate) opener: Opener,
+    /// The Settings screen, while open.
+    pub(crate) settings: Option<SettingsState>,
+    /// Compact rows.
+    pub(crate) compact: bool,
 }
 
 impl SiftApp {
@@ -131,6 +136,8 @@ impl SiftApp {
             hold: false,
             expanded: Vec::new(),
             opener: |path| open::that_detached(path),
+            settings: None,
+            compact: false,
         };
         app.load_preferences(window, cx);
         app.reload();
@@ -487,6 +494,27 @@ impl SiftApp {
         {
             self.toggle_palette(window, cx);
             cx.stop_propagation();
+            return;
+        }
+        if keystroke.modifiers.secondary() && key == "," && self.form.is_none() {
+            self.open_settings(super::settings::SettingsPage::General, window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.settings.is_some() && self.form.is_none() {
+            // Settings has its own text boxes; Escape backs out.
+            if key == "escape" {
+                if self
+                    .settings
+                    .as_ref()
+                    .is_some_and(|s| s.confirm_remove.is_some())
+                {
+                    self.cancel_remove_account(cx);
+                } else {
+                    self.close_settings(window, cx);
+                }
+                cx.stop_propagation();
+            }
             return;
         }
         if self.overlay.is_some() {

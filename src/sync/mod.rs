@@ -61,9 +61,21 @@ pub fn sync_all<S: MailSession>(
     connect: impl Fn(&ImapSettings, &str) -> Result<S, SyncError>,
     now: DateTime<Utc>,
 ) -> Result<AccountResults, SyncError> {
+    sync_some(store, secrets, connect, now, None)
+}
+
+/// Syncs one account, or every account when `only` is `None`.
+pub fn sync_some<S: MailSession>(
+    store: &MailStore,
+    secrets: &dyn Secrets,
+    connect: impl Fn(&ImapSettings, &str) -> Result<S, SyncError>,
+    now: DateTime<Utc>,
+    only: Option<crate::domain::AccountId>,
+) -> Result<AccountResults, SyncError> {
     let accounts = store.imap_accounts()?;
     Ok(accounts
         .into_iter()
+        .filter(|(account, _, _)| only.is_none_or(|id| id == account.id))
         .map(|(account, settings, cursor)| {
             let result = sync_one(store, secrets, &connect, &account, &settings, cursor, now);
             (account.id, result)

@@ -73,6 +73,9 @@ src/
     chrome.rs    sidebar, account filter, palette, dialogs, bulk selection, preferences
     chrome_view.rs  how those look
     accounts.rs  Add account dialog, background sync and status
+    settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
+                 connection, removal), default From, appearance, notifications, keyboard
+    settings_view.rs  how Settings looks
     compose.rs   reply box and New message dialog
     render.rs    title bar, list, reader, snooze menu, toasts
 ```
@@ -96,6 +99,7 @@ src/
 | `?` | Keyboard shortcuts |
 | `A` | AI summaries instead of previews |
 | `[` | Sidebar |
+| `Ctrl` + `,` | Settings |
 | `7`–`9` | Custom views |
 | `Ctrl` + `Enter` (`Cmd` on macOS) | Send |
 
