@@ -41,6 +41,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Use Git Bash (Windows)
+        # A bare "bash" can resolve to WSL's bash.exe, which can't see the
+        # runner's Windows paths. Put Git for Windows' bash first instead.
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = Split-Path (Split-Path (Get-Command git).Source)
+          # Windows PowerShell's utf8 adds a BOM, which would spoil the path.
+          [IO.File]::AppendAllText($env:GITHUB_PATH, "$git\bin`n")
+
+      - name: System libraries (Linux)
+        # GPUI links against these; install whichever the runner lacks.
+        if: runner.os == 'Linux'
+        run: |
+          pkgs="build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev"
+          missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+          if [ -n "$missing" ]; then
+            sudo=$(command -v sudo || true)
+            $sudo apt-get update -qq
+            $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing
+          fi
+
       - name: Toolchain
         # rust-toolchain.toml pins the version; rustup installs it on first use.
         run: rustup show active-toolchain
@@ -64,6 +86,28 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Use Git Bash (Windows)
+        # A bare "bash" can resolve to WSL's bash.exe, which can't see the
+        # runner's Windows paths. Put Git for Windows' bash first instead.
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = Split-Path (Split-Path (Get-Command git).Source)
+          # Windows PowerShell's utf8 adds a BOM, which would spoil the path.
+          [IO.File]::AppendAllText($env:GITHUB_PATH, "$git\bin`n")
+
+      - name: System libraries (Linux)
+        # GPUI links against these; install whichever the runner lacks.
+        if: runner.os == 'Linux'
+        run: |
+          pkgs="build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev"
+          missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+          if [ -n "$missing" ]; then
+            sudo=$(command -v sudo || true)
+            $sudo apt-get update -qq
+            $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing
+          fi
 
       - name: Install cargo-llvm-cov
         run: command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked

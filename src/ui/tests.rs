@@ -28,11 +28,16 @@ pub(super) fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, E
     })
 }
 
+/// Presses keys in order. Tests write shortcuts with `ctrl-`; on macOS that
+/// becomes `cmd-`, the platform's primary modifier, as a person would press.
 pub(super) fn press(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &[&str]) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         for key in keys {
-            window.press(key, cx);
+            match key.strip_prefix("ctrl-") {
+                Some(rest) if cfg!(target_os = "macos") => window.press(&format!("cmd-{rest}"), cx),
+                _ => window.press(key, cx),
+            }
         }
     })
     .unwrap();
