@@ -5,12 +5,11 @@
 //! only sees valid recipients and a non-empty body. Sending runs in the
 //! background; the composer keeps its text until the server accepts the mail.
 
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_kit::component::{Icon, IconName};
+use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, Entity, Focusable as _, FontWeight, TestSupportExt as _,
-    Window, div, hsla, px,
+    AnyElement, ClickEvent, Context, Focusable as _, FontWeight, TestSupportExt as _, Window, div,
+    px,
 };
 
 use super::app::{SiftApp, Toast};
@@ -18,14 +17,6 @@ use crate::domain::outgoing::reply_subject;
 use crate::domain::{AccountId, Draft, Recipients, ReplyContext, ThreadRef};
 use crate::sync::send::SendRequest;
 use crate::theme::tokens::{Palette, radius, text};
-
-/// The New message dialog.
-pub(crate) struct ComposeForm {
-    pub(crate) to: Entity<InputState>,
-    pub(crate) subject: Entity<InputState>,
-    pub(crate) body: Entity<TextareaState>,
-    pub(crate) error: Option<String>,
-}
 
 impl SiftApp {
     /// Whether the New message dialog is open.
@@ -48,12 +39,16 @@ impl SiftApp {
 
     /// The account new mail is sent from: the first that can send.
     fn sending_account(&self) -> Option<AccountId> {
-        self.store
+        let sendable: Vec<AccountId> = self
+            .store
             .imap_accounts()
             .ok()?
             .into_iter()
             .map(|(account, _, _)| account.id)
-            .next()
+            .collect();
+        self.default_from()
+            .filter(|id| sendable.contains(id))
+            .or_else(|| sendable.first().copied())
     }
 
     pub(crate) fn ensure_reply_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -141,37 +136,6 @@ impl SiftApp {
         );
     }
 
-    /// Opens the New message dialog.
-    pub fn open_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let to = cx.new(|cx| InputState::new(window, cx).placeholder("Name@example.com, …"));
-        let subject = cx.new(|cx| InputState::new(window, cx).placeholder("Subject"));
-        let body = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .placeholder("Write your message…")
-                .auto_grow(6, 14)
-        });
-        for state in [&to, &subject] {
-            cx.subscribe_in(state, window, send_on_secondary_enter)
-                .detach();
-        }
-        cx.subscribe_in(&body, window, send_on_secondary_enter)
-            .detach();
-        to.read(cx).focus_handle(cx).focus(window, cx);
-        self.compose = Some(ComposeForm {
-            to,
-            subject,
-            body,
-            error: None,
-        });
-        cx.notify();
-    }
-
-    /// Closes the New message dialog, discarding it.
-    pub fn close_compose(&mut self, cx: &mut Context<Self>) {
-        self.compose = None;
-        cx.notify();
-    }
-
     /// Validates and sends the New message dialog.
     pub fn send_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.sending {
@@ -181,7 +145,7 @@ impl SiftApp {
         let Some(form) = self.compose.as_mut() else {
             return;
         };
-        let to = form.to.read(cx).value();
+        let to = form.to_text(cx);
         let subject = form.subject.read(cx).value();
         let body = form.body.read(cx).value();
         let draft = Recipients::parse(&to).and_then(|to| Draft::new(to, &subject, &body));
@@ -312,6 +276,7 @@ impl SiftApp {
             .overflow_hidden()
             .flex()
             .flex_col()
+            .children(self.drafts_row(p, cx))
             .child(
                 div()
                     .px(px(14.0))
@@ -333,6 +298,7 @@ impl SiftApp {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
+                    .children(self.tone_buttons(p, cx))
                     .when_some(self.reply_error.clone(), |d, e| {
                         d.child(
                             div()
@@ -362,143 +328,13 @@ impl SiftApp {
             )
             .into_any_element()
     }
-
-    pub(crate) fn compose_dialog(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let Some(form) = self.compose.as_ref() else {
-            return div().into_any_element();
-        };
-        let row = |label: &'static str, input: AnyElement| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(10.0))
-                .child(div().w(px(64.0)).text_color(p.ink_3).child(label))
-                .child(div().flex_1().child(input))
-        };
-        let hover = p.bg_hover;
-        div()
-            .id("compose-scrim")
-            .absolute()
-            .inset_0()
-            .bg(hsla(0.0, 0.0, 0.0, 0.28))
-            .flex()
-            .justify_center()
-            .pt(px(80.0))
-            .child(
-                div()
-                    .id("compose")
-                    .w(px(560.0))
-                    .h_auto()
-                    .rounded(px(radius::CARD))
-                    .bg(p.bg)
-                    .border_1()
-                    .border_color(p.line_strong)
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .h(px(44.0))
-                            .px(px(16.0))
-                            .flex()
-                            .items_center()
-                            .bg(p.bg_subtle)
-                            .border_b_1()
-                            .border_color(p.line)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("New message"),
-                    )
-                    .child(
-                        div()
-                            .p(px(14.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(10.0))
-                            .child(row(
-                                "To",
-                                Input::new(&form.to).id("compose-to").into_any_element(),
-                            ))
-                            .child(row(
-                                "Subject",
-                                Input::new(&form.subject)
-                                    .id("compose-subject")
-                                    .into_any_element(),
-                            ))
-                            .child(Textarea::new(&form.body)),
-                    )
-                    .child(
-                        div()
-                            .px(px(14.0))
-                            .py(px(10.0))
-                            .border_t_1()
-                            .border_color(p.line)
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .when_some(form.error.clone(), |d, e| {
-                                d.child(
-                                    div()
-                                        .id("compose-error")
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .gap(px(6.0))
-                                        .text_color(p.danger)
-                                        .child(Icon::new(IconName::CircleAlert).size(px(14.0)))
-                                        .child(e),
-                                )
-                            })
-                            .when(form.error.is_none(), |d| d.child(div().flex_1()))
-                            .child(
-                                div()
-                                    .id("compose-cancel")
-                                    .flex_none()
-                                    .h(px(32.0))
-                                    .px(px(12.0))
-                                    .flex()
-                                    .items_center()
-                                    .rounded(px(radius::BUTTON))
-                                    .border_1()
-                                    .border_color(p.line_strong)
-                                    .hover(move |s| s.bg(hover))
-                                    .child("Discard")
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                        this.close_compose(cx)
-                                    }))
-                                    .test_support(),
-                            )
-                            .child(
-                                send_button("compose-send", self.sending, p)
-                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                        this.send_compose(window, cx)
-                                    }))
-                                    .test_support(),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
 }
 
-fn send_on_secondary_enter<S: 'static>(
-    this: &mut SiftApp,
-    _: &Entity<S>,
-    event: &InputEvent,
-    window: &mut Window,
-    cx: &mut Context<SiftApp>,
-) {
-    if matches!(
-        event,
-        InputEvent::PressEnter {
-            secondary: true,
-            ..
-        }
-    ) {
-        this.send_compose(window, cx);
-    }
-}
-
-fn send_button(id: &'static str, sending: bool, p: &Palette) -> gpui_kit::Stateful<gpui_kit::Div> {
+pub(super) fn send_button(
+    id: &'static str,
+    sending: bool,
+    p: &Palette,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     div()
         .id(id)
         .flex_none()

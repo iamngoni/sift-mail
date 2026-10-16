@@ -58,6 +58,9 @@ src/
     prefs.rs     preferences, custom views, per-account settings, send-as aliases
     files.rs     attachments saved beside the database
     demo.rs      sample mail, only with --features demo and in tests
+  ai/
+    mod.rs       the Assistant trait; Claude Code and Codex as subprocesses
+    prompts.rs   prompts and tolerant JSON parsing of answers
   oauth/
     mod.rs       browser sign-in: PKCE, token exchange and refresh, error mapping
     loopback.rs  one-shot 127.0.0.1 listener for the redirect
@@ -82,7 +85,10 @@ src/
     settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
                  connection, removal), default From, appearance, notifications, keyboard
     settings_view.rs  how Settings looks
-    compose.rs   reply box and New message dialog
+    compose.rs   reply box and sending
+    compose_form.rs  New message: recipient chips, suggestions, Write it, drafts
+    ai_ui.rs     AI state: summaries, drafts, rewrites, Ask, Write it
+    ai_view.rs   how AI shows up (sparkles, summary card, draft chips)
     render.rs    title bar, list, reader, snooze menu, toasts
 ```
 
@@ -167,6 +173,23 @@ SIFT_GOOGLE_CLIENT_ID=… SIFT_GOOGLE_CLIENT_SECRET=… cargo build --release
 ```
 
 Google's "secret" for desktop apps is not confidential; Google requires it anyway.
+
+## AI
+
+Sift has no API keys and no AI sign-in of its own. It runs the assistant you
+already use, signed in with your own subscription:
+
+- **Claude Code**: install it, run `claude` once and sign in.
+- **Codex**: `npm install -g @openai/codex`, run `codex` once and sign in.
+
+Pick one under Settings → AI. Each request runs the CLI non-interactively in an
+empty temporary folder with its tools turned off, sends the prompt on standard
+input, and stops after 90 seconds. AI only reads a thread when you use a
+feature on it, only for accounts with AI on, and answers are cached locally so
+nothing is asked twice. Features: one-line summaries in the list (`A`), a
+summary card with to-dos in the reader, reply drafts and Shorter / Friendlier /
+More formal rewrites, Ask your inbox (end a palette search with `?`), and Write
+it in New message.
 
 ## Quality gates
 

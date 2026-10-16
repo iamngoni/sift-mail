@@ -11,6 +11,7 @@ use gpui_kit::{
     px,
 };
 
+use super::ai_ui::AiState;
 use super::app::SiftApp;
 use super::chrome::{Overlay, PaletteAction, SHORTCUTS, VIEW_IDEAS};
 use super::render::{kbd, scrim, view_icon};
@@ -767,6 +768,90 @@ impl SiftApp {
             .into_any_element()
     }
 
+    /// The Ask your inbox answer under the palette's search box.
+    fn palette_answer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let Some(Overlay::Palette(state)) = &self.overlay else {
+            return None;
+        };
+        let answer = state.answer.as_ref()?;
+        let hover = p.bg_hover;
+        let body = match answer {
+            AiState::Loading => div()
+                .text_color(p.ink_3)
+                .child("Looking through your mail…")
+                .into_any_element(),
+            AiState::Failed(why) => div()
+                .text_color(p.danger)
+                .child(format!("Couldn't answer: {why}"))
+                .into_any_element(),
+            AiState::Ready(found) => div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(px(text::BODY))
+                        .child(found.answer.answer.clone()),
+                )
+                .when_some(found.source.clone(), |d, source| {
+                    let subject = source.subject.clone();
+                    let from = source.from.display().to_owned();
+                    d.child(
+                        div()
+                            .id("answer-source")
+                            .h(px(36.0))
+                            .px(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .rounded(px(7.0))
+                            .border_1()
+                            .border_color(p.accent_line)
+                            .bg(p.bg)
+                            .hover(move |s| s.bg(hover))
+                            .child(
+                                Icon::new(IconName::ArrowRight)
+                                    .size(px(14.0))
+                                    .text_color(p.accent_text),
+                            )
+                            .child(div().flex_1().min_w_0().truncate().child(subject))
+                            .child(div().text_color(p.ink_3).child(from))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                this.close_overlay(window, cx);
+                                this.open_summary(source.clone(), cx);
+                            }))
+                            .test_support(),
+                    )
+                })
+                .into_any_element(),
+        };
+        Some(
+            div()
+                .m(px(8.0))
+                .p(px(12.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .rounded(px(radius::BUTTON))
+                .border_1()
+                .border_color(p.accent_line)
+                .bg(p.accent_soft)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_size(px(text::SMALL))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(p.accent_text)
+                        .child(Icon::new(Lucide::Sparkles).size(px(12.0)))
+                        .child("ANSWER FROM YOUR INBOX"),
+                )
+                .child(body)
+                .into_any_element(),
+        )
+    }
+
     /// The open dialog or popover, if any.
     pub(super) fn overlay_layer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let overlay = self.overlay.as_ref()?;
@@ -849,7 +934,11 @@ impl SiftApp {
         let mut rows: Vec<AnyElement> = Vec::new();
         let mut last_kind = None;
         for (i, item) in state.items.iter().enumerate() {
-            let kind = matches!(item.action, PaletteAction::Open(_));
+            let kind = match item.action {
+                PaletteAction::Open(_) => 0u8,
+                PaletteAction::Run(_) => 1,
+                PaletteAction::Ask(_) => 2,
+            };
             if last_kind != Some(kind) {
                 rows.push(
                     div()
@@ -859,7 +948,11 @@ impl SiftApp {
                         .text_size(px(text::SMALL))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(p.ink_3)
-                        .child(if kind { "MAIL" } else { "COMMANDS" })
+                        .child(match kind {
+                            0 => "MAIL",
+                            1 => "COMMANDS",
+                            _ => "ASK YOUR INBOX",
+                        })
                         .into_any_element(),
                 );
                 last_kind = Some(kind);
@@ -877,11 +970,11 @@ impl SiftApp {
                     .when(on, |r| r.bg(p.bg_active))
                     .when(!on, |r| r.hover(move |s| s.bg(hover)))
                     .child(
-                        Icon::new(if kind {
-                            IconName::Inbox
-                        } else {
-                            IconName::ChevronRight
-                        })
+                        match kind {
+                            0 => Icon::new(IconName::Inbox),
+                            1 => Icon::new(IconName::ChevronRight),
+                            _ => Icon::new(Lucide::Sparkles),
+                        }
                         .size(px(14.0))
                         .text_color(p.ink_3),
                     )
@@ -940,6 +1033,7 @@ impl SiftApp {
                     )
                     .child(kbd("Esc", p)),
             )
+            .children(self.palette_answer(p, cx))
             .child(
                 div()
                     .id("palette-results")

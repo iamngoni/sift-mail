@@ -15,6 +15,8 @@ use super::chrome::SHORTCUTS;
 use super::chrome_view::{account_avatar, checkbox, small_button};
 use super::render::{kbd, scrim};
 use super::settings::{SettingsPage, provider_name};
+use crate::ai::{AiProvider, CliAssistant};
+use crate::domain::choices::AiFeature;
 use crate::domain::time::{DayBucket, bucket};
 use crate::domain::{AccountId, Provider};
 use crate::store::{Account, NotifyLevel, SyncRange};
@@ -157,11 +159,7 @@ impl SiftApp {
         let body = match state.page {
             SettingsPage::Accounts => self.accounts_page(p, cx),
             SettingsPage::General => self.general_page(p, cx),
-            SettingsPage::Ai => self.simple_page(
-                "AI",
-                "Summaries, reply drafts and Ask your inbox run through the assistant you already use: Claude Code or Codex, signed in with your own subscription. Sift never asks for an API key.",
-                p,
-            ),
+            SettingsPage::Ai => self.ai_page(p, cx),
             SettingsPage::Notifications => self.notifications_page(p, cx),
             SettingsPage::Appearance => self.appearance_page(p, cx),
             SettingsPage::Keyboard => self.keyboard_page(p),
@@ -277,6 +275,139 @@ impl SiftApp {
                     .text_size(px(text::BODY))
                     .child(body),
             )
+            .into_any_element()
+    }
+
+    fn ai_page(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let hover = p.bg_hover;
+        let choices: Vec<AnyElement> = AiProvider::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(i, provider)| {
+                let on = self.ai_provider == provider;
+                let installed =
+                    provider == AiProvider::Off || CliAssistant::find(provider).is_some();
+                let status = match (provider, installed) {
+                    (AiProvider::Off, _) => provider.setup_hint().to_owned(),
+                    (_, true) => CliAssistant::find(provider)
+                        .map(|a| format!("Found at {}", a.program().display()))
+                        .unwrap_or_default(),
+                    (_, false) => provider.setup_hint().to_owned(),
+                };
+                div()
+                    .id(("ai-provider", i))
+                    .p(px(14.0))
+                    .flex()
+                    .items_start()
+                    .gap(px(12.0))
+                    .rounded(px(radius::CARD))
+                    .border_1()
+                    .border_color(if on { p.accent } else { p.line_strong })
+                    .when(on, |c| c.bg(p.accent_soft))
+                    .when(!on, |c| c.hover(move |s| s.bg(hover)))
+                    .child(
+                        div()
+                            .mt(px(2.0))
+                            .size(px(16.0))
+                            .flex_none()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(if on { p.accent } else { p.line_strong })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(on, |r| {
+                                r.child(div().size(px(8.0)).rounded_full().bg(p.accent))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(provider.label()),
+                                    )
+                                    .when(provider != AiProvider::Off, |d| {
+                                        d.child(
+                                            div()
+                                                .h(px(20.0))
+                                                .px(px(8.0))
+                                                .flex()
+                                                .items_center()
+                                                .rounded_full()
+                                                .text_size(px(text::SMALL))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .bg(if installed {
+                                                    p.good_soft
+                                                } else {
+                                                    p.warn_soft
+                                                })
+                                                .text_color(if installed { p.good } else { p.warn })
+                                                .child(if installed {
+                                                    "Installed"
+                                                } else {
+                                                    "Not found"
+                                                }),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(text::META))
+                                    .text_color(p.ink_3)
+                                    .child(status),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.set_ai_provider(provider, cx)
+                    }))
+                    .test_support()
+                    .into_any_element()
+            })
+            .collect();
+        let helpers: Vec<AnyElement> = AiFeature::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(i, feature)| {
+                let (title, body) = feature.copy();
+                row(
+                    title,
+                    Some(body.into()),
+                    switch(("ai-feature", i), self.ai_features.on(feature), p)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.toggle_ai_feature(feature, cx)
+                        }))
+                        .test_support()
+                        .into_any_element(),
+                    p,
+                )
+            })
+            .collect();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(Self::page_title(
+                "AI",
+                Some("Sift uses the assistant you already have, signed in with your own subscription. No API keys.".into()),
+                p,
+            ))
+            .children(choices)
+            .child(div().h(px(8.0)))
+            .child(div().flex().flex_col().children(helpers))
+            .child(div().text_size(px(text::META)).text_color(p.ink_3).child(
+                "AI only reads a message when you use a feature on it, only for accounts with AI on (see Accounts), and nothing is kept by Sift beyond the answer.",
+            ))
             .into_any_element()
     }
 

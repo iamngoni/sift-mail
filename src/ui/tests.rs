@@ -574,7 +574,7 @@ pub(super) mod compose_ui {
             read(cx, &view, |a| a.compose_error().map(str::to_owned)),
             Some("Add an account before sending mail.".into())
         );
-        click(cx, handle, "compose-cancel");
+        click(cx, handle, "compose-discard");
         assert!(!read(cx, &view, SiftApp::is_composing));
 
         add_account(cx, handle, &view);

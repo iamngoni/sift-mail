@@ -22,7 +22,7 @@ pub(crate) enum Overlay {
     /// The keyboard shortcuts sheet.
     Shortcuts,
     /// Search and commands.
-    Palette(PaletteState),
+    Palette(Box<PaletteState>),
     /// Describing a new view.
     NewView(NewViewForm),
     /// The account switcher under the title bar.
@@ -36,6 +36,8 @@ pub(crate) struct PaletteState {
     pub(crate) input: Entity<InputState>,
     pub(crate) items: Vec<PaletteItem>,
     pub(crate) selected: usize,
+    /// The Ask your inbox answer, once asked.
+    pub(crate) answer: Option<super::ai_ui::AiState<super::ai_ui::InboxAnswer>>,
 }
 
 /// The open New view dialog.
@@ -60,6 +62,8 @@ pub(crate) enum PaletteAction {
     Open(ThreadSummary),
     /// Runs a command.
     Run(Command),
+    /// Asks the inbox a question.
+    Ask(String),
 }
 
 /// A command the palette can run.
@@ -274,6 +278,7 @@ impl SiftApp {
     pub fn set_summaries(&mut self, on: bool, cx: &mut Context<Self>) {
         self.summaries = on;
         self.save_flag(Pref::Summaries, on);
+        self.ensure_list_summaries(cx);
         cx.notify();
     }
 
@@ -448,11 +453,12 @@ impl SiftApp {
         input.read(cx).focus_handle(cx).focus(window, cx);
         let dark = SiftTheme::get(cx).palette() == &theme::tokens::DARK;
         let items = self.palette_items("", dark);
-        self.overlay = Some(Overlay::Palette(PaletteState {
+        self.overlay = Some(Overlay::Palette(Box::new(PaletteState {
             input,
             items,
             selected: 0,
-        }));
+            answer: None,
+        })));
         cx.notify();
     }
 
@@ -461,6 +467,18 @@ impl SiftApp {
         let query = query.trim();
         let needle = query.to_lowercase();
         let mut items = Vec::new();
+        if query.ends_with('?')
+            && self.ai.is_some()
+            && self.ai_features.on(crate::domain::choices::AiFeature::Ask)
+        {
+            items.push(PaletteItem {
+                label: query.to_owned(),
+                sub: "Ask your inbox".to_owned(),
+                key: "↵",
+                action: PaletteAction::Ask(query.to_owned()),
+            });
+            return items;
+        }
         if !query.is_empty() {
             let hits = self.store.search(query).unwrap_or_default();
             items.extend(hits.into_iter().take(PALETTE_MAIL).map(|t| PaletteItem {
@@ -510,8 +528,13 @@ impl SiftApp {
         let Some(item) = p.items.get(index).cloned() else {
             return;
         };
+        if let PaletteAction::Ask(question) = item.action {
+            self.ask_inbox(question, cx);
+            return;
+        }
         self.close_overlay(window, cx);
         match item.action {
+            PaletteAction::Ask(_) => {}
             PaletteAction::Open(summary) => self.open_summary(summary, cx),
             PaletteAction::Run(command) => self.run_command(command, window, cx),
         }

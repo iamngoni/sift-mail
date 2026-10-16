@@ -30,6 +30,7 @@ const LIST_WIDTH: f32 = 1000.0;
 impl Render for SiftApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_reply_box(window, cx);
+        self.ensure_list_summaries(cx);
         let sift = *SiftTheme::get(cx);
         let p = *sift.palette();
         let body = match &self.open {
@@ -344,7 +345,13 @@ impl SiftApp {
                                     .text_color(strong)
                                     .child(subject_or_placeholder(&thread.subject)),
                             )
-                            .child(div().truncate().child(format!("— {}", thread.preview))),
+                            .child(match self.row_summary(thread, p) {
+                                Some(summary) => summary,
+                                None => div()
+                                    .truncate()
+                                    .child(format!("— {}", thread.preview))
+                                    .into_any_element(),
+                            }),
                     ),
             )
             .when(thread.has_attachments, |row| {
@@ -560,6 +567,7 @@ impl SiftApp {
             .id("reader")
             .flex_1()
             .overflow_y_scroll()
+            .test_support()
             .flex()
             .justify_center()
             .items_start()
@@ -645,6 +653,7 @@ impl SiftApp {
                                     .when_some(account, |d, name| d.child("·").child(name)),
                             ),
                     )
+                    .children(self.ai_card(open, p, cx))
                     .child(
                         div()
                             .rounded(px(radius::CARD))

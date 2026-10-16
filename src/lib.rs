@@ -4,6 +4,7 @@
 //! tokens and theme, mail domain types, and the UI. `main.rs` only wires the
 //! process together, so all behaviour here is reachable from tests.
 
+pub mod ai;
 pub mod assets;
 pub mod brand;
 pub mod domain;
