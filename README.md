@@ -37,6 +37,14 @@ SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
 The interface uses [Geist and Geist Mono](https://github.com/vercel/geist-font),
 bundled in `assets/fonts` under the SIL Open Font License (`assets/fonts/OFL.txt`).
 
+## App icon
+
+The icon is drawn in `assets/app-icon/sift-mail.svg` (macOS grid) and
+`sift-mail-square.svg` (Windows and Linux). `tools/make-icons.ps1` renders them
+with Microsoft Edge and writes the PNG sizes, `SiftMail.ico` and `SiftMail.icns`;
+rerun it after editing either SVG. `build.rs` puts the `.ico` into `SiftMail.exe`,
+and cargo-packager puts the rest into the installers.
+
 ## Naming
 
 | Where | Name |
@@ -52,6 +60,7 @@ The constants live in [`src/brand.rs`](src/brand.rs).
 ```text
 src/
   main.rs        process wiring only (excluded from coverage)
+  ../build.rs    puts the app icon into SiftMail.exe on Windows
   lib.rs         everything testable
   assets.rs      extra Lucide icons embedded on top of GPUI Kit's set
   brand.rs       product naming

@@ -42,6 +42,9 @@ sha2 = "0.10"
 thiserror = "2"
 url = "2.5"
 
+[build-dependencies]
+embed-resource = "3.0.12"
+
 [dev-dependencies]
 gpui-kit = { version = "=0.7.3", features = ["test-support"] }
 
@@ -70,6 +73,15 @@ copyright = "Copyright 2026 Sift Mail contributors"
 before-packaging-command = "cargo build --release --locked"
 out-dir = "target/packages"
 binaries = [{ path = "SiftMail", main = true }]
+# Made from assets/app-icon/*.svg by tools/make-icons.ps1.
+icons = [
+  "assets/app-icon/png/32.png",
+  "assets/app-icon/png/128.png",
+  "assets/app-icon/png/256.png",
+  "assets/app-icon/png/512.png",
+  "assets/app-icon/SiftMail.icns",
+  "assets/app-icon/SiftMail.ico",
+]
 
 [package.metadata.packager.windows]
 allow-downgrades = false
