@@ -20,6 +20,43 @@ pub enum ParseError {
     NoSender,
 }
 
+/// One attached file, decoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentData {
+    /// File name as sent, or `attachment-<n>` when it had none.
+    pub name: String,
+    /// MIME type, such as `application/pdf`.
+    pub mime: String,
+    /// Decoded contents.
+    pub bytes: Vec<u8>,
+}
+
+/// The attachments in `raw`, decoded. Unparseable mail has none.
+pub fn attachments(raw: &[u8]) -> Vec<AttachmentData> {
+    let Some(message) = MessageParser::default().parse(raw) else {
+        return Vec::new();
+    };
+    message
+        .attachments()
+        .enumerate()
+        .map(|(i, part)| AttachmentData {
+            name: part
+                .attachment_name()
+                .map(str::to_owned)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| format!("attachment-{}", i + 1)),
+            mime: part.content_type().map_or_else(
+                || "application/octet-stream".to_owned(),
+                |ct| match ct.subtype() {
+                    Some(sub) => format!("{}/{sub}", ct.ctype()),
+                    None => ct.ctype().to_owned(),
+                },
+            ),
+            bytes: part.contents().to_vec(),
+        })
+        .collect()
+}
+
 /// Everything known about a message besides its bytes.
 #[derive(Debug, Clone)]
 pub struct Envelope<'a> {
@@ -335,6 +372,16 @@ MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"x\"\r\n\r\n\
 Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--x--\r\n";
         let m = parse(raw.as_bytes(), &envelope(&me)).unwrap();
         assert!(m.has_attachments);
+        let files = attachments(raw.as_bytes());
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            (files[0].name.as_str(), files[0].mime.as_str()),
+            ("c.pdf", "application/pdf")
+        );
+        assert_eq!(files[0].bytes, b"%PDF-");
+        let unnamed = raw.replace("; filename=\"c.pdf\"", "");
+        assert_eq!(attachments(unnamed.as_bytes())[0].name, "attachment-1");
+        assert!(attachments(b"").is_empty());
     }
 
     #[test]

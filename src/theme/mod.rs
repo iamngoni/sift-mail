@@ -42,6 +42,24 @@ impl Appearance {
         }
     }
 
+    /// Stored form, for preferences.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::System => "system",
+        }
+    }
+
+    /// Parses [`Appearance::key`]; anything else matches the system.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "light" => Self::Light,
+            "dark" => Self::Dark,
+            _ => Self::System,
+        }
+    }
+
     /// Human label, as shown in the toolbar tooltip.
     pub fn label(self) -> &'static str {
         match self {
@@ -221,6 +239,14 @@ pub fn apply(appearance: Appearance, window: Option<&mut Window>, cx: &mut App) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appearance_keys_round_trip() {
+        for a in [Appearance::Light, Appearance::Dark, Appearance::System] {
+            assert_eq!(Appearance::from_key(a.key()), a);
+        }
+        assert_eq!(Appearance::from_key("sepia"), Appearance::System);
+    }
 
     #[test]
     fn appearance_cycles_through_all_three() {

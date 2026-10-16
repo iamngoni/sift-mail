@@ -11,8 +11,10 @@ component library).
 > Passwords and sign-in tokens live in the OS credential store. Reply from any
 > thread or write a new message; mail goes out over SMTP with proper threading
 > headers and a copy is saved to your server's Sent folder. Reading a thread
-> marks it read on the server too. The inbox supports views, day sections,
-> Done, Snooze, read/unread and Undo from the keyboard. Try it with sample mail:
+> marks it read on the server too. The inbox has views, custom views you
+> describe, day sections, a sidebar with every account, full-text search and
+> commands in one palette (Ctrl K), bulk selection, attachments that open in
+> your usual apps, and Done, Snooze, read/unread and Undo from the keyboard. Try it with sample mail:
 >
 > ```sh
 > SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
@@ -34,6 +36,7 @@ The constants live in [`src/brand.rs`](src/brand.rs).
 src/
   main.rs        process wiring only (excluded from coverage)
   lib.rs         everything testable
+  assets.rs      extra Lucide icons embedded on top of GPUI Kit's set
   brand.rs       product naming
   theme/
     color.rs     validated #RRGGBB colours, WCAG contrast
@@ -49,6 +52,9 @@ src/
   store/
     mod.rs       SQLite mail store: threads, counts, triage actions, undo, IMAP cursors
     schema.rs    migrations (PRAGMA user_version)
+    search.rs    full-text search (FTS5) with user text kept out of query syntax
+    prefs.rs     preferences, custom views, per-account settings, send-as aliases
+    files.rs     attachments saved beside the database
     demo.rs      sample mail, only with --features demo and in tests
   oauth/
     mod.rs       browser sign-in: PKCE, token exchange and refresh, error mapping
@@ -64,6 +70,8 @@ src/
   ui/
     mod.rs       window options, opening the store and the main window
     app.rs       inbox state and actions, keyboard handling
+    chrome.rs    sidebar, account filter, palette, dialogs, bulk selection, preferences
+    chrome_view.rs  how those look
     accounts.rs  Add account dialog, background sync and status
     compose.rs   reply box and New message dialog
     render.rs    title bar, list, reader, snooze menu, toasts
@@ -78,11 +86,17 @@ src/
 | `Enter` / `O` | Open thread |
 | `Esc` | Back to the list, or close the snooze menu |
 | `E` | Done |
-| `S`, then `1`–`3` | Snooze: later today, tomorrow, next week |
+| `S`, then `1`–`4` | Snooze: later today, tomorrow, Monday, next week |
+| `X` | Select the thread under the cursor (Esc clears) |
 | `U` | Toggle read |
 | `Z` | Undo |
 | `R` | Reply to the open thread |
 | `C` | New message |
+| `Ctrl` + `K` or `/` | Search and commands |
+| `?` | Keyboard shortcuts |
+| `A` | AI summaries instead of previews |
+| `[` | Sidebar |
+| `7`–`9` | Custom views |
 | `Ctrl` + `Enter` (`Cmd` on macOS) | Send |
 
 Design tokens come from the approved style spec. Change colours, radii, spacing

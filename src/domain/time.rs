@@ -84,8 +84,8 @@ pub struct SnoozeOption {
     pub until: DateTime<Utc>,
 }
 
-/// The three snooze choices: three hours from now, tomorrow at 08:00, and
-/// next Monday at 08:00, all in local time.
+/// The four snooze choices: three hours from now, tomorrow at 08:00, next
+/// Monday at 08:00 and the Monday after, all in local time.
 pub fn snooze_options<Tz: TimeZone>(now: DateTime<Utc>, tz: &Tz) -> Vec<SnoozeOption>
 where
     Tz::Offset: std::fmt::Display,
@@ -105,24 +105,30 @@ where
         .and_then(at_eight);
     let mut options = vec![SnoozeOption {
         label: "Later today",
-        when: later.with_timezone(tz).format("%-H:%M").to_string(),
+        when: later.with_timezone(tz).format("%H:%M").to_string(),
         until: later,
     }];
     if let Some(until) = tomorrow {
         options.push(SnoozeOption {
             label: "Tomorrow",
-            when: until.with_timezone(tz).format("%a %-H:%M").to_string(),
+            when: until.with_timezone(tz).format("%a %H:%M").to_string(),
             until,
         });
     }
     if let Some(until) = monday {
         options.push(SnoozeOption {
-            label: "Next week",
-            when: until
-                .with_timezone(tz)
-                .format("Mon %-d %b, %-H:%M")
-                .to_string(),
+            label: "Monday",
+            when: until.with_timezone(tz).format("%-d %b, %H:%M").to_string(),
             until,
+        });
+        let week = until + chrono::Duration::days(7);
+        options.push(SnoozeOption {
+            label: "Next week",
+            when: week
+                .with_timezone(tz)
+                .format("Mon %-d %b, %H:%M")
+                .to_string(),
+            until: week,
         });
     }
     options
@@ -217,13 +223,15 @@ mod tests {
     fn snooze_options_land_on_sensible_local_times() {
         let options = snooze_options(now(), &tz());
         let labels: Vec<_> = options.iter().map(|o| o.label).collect();
-        assert_eq!(labels, ["Later today", "Tomorrow", "Next week"]);
+        assert_eq!(labels, ["Later today", "Tomorrow", "Monday", "Next week"]);
         assert_eq!(options[0].until, now() + chrono::Duration::hours(3));
         assert_eq!(options[0].when, "13:00");
         // Saturday 17 Oct, 08:00 in UTC+2 is 06:00 UTC.
         assert_eq!(options[1].until, utc("2026-10-17T06:00:00Z"));
-        assert_eq!(options[1].when, "Sat 8:00");
+        assert_eq!(options[1].when, "Sat 08:00");
         assert_eq!(options[2].until, utc("2026-10-19T06:00:00Z"));
-        assert_eq!(options[2].when, "Mon 19 Oct, 8:00");
+        assert_eq!(options[2].when, "19 Oct, 08:00");
+        assert_eq!(options[3].until, utc("2026-10-26T06:00:00Z"));
+        assert_eq!(options[3].when, "Mon 26 Oct, 08:00");
     }
 }

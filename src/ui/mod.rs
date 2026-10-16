@@ -3,9 +3,13 @@
 
 mod accounts;
 mod app;
+mod chrome;
+mod chrome_view;
 mod compose;
 mod render;
 
+#[cfg(test)]
+mod chrome_tests;
 #[cfg(test)]
 mod tests;
 
