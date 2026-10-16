@@ -1,0 +1,89 @@
+# Format, lint, test on all three platforms, and the 95% line-coverage gate.
+# Runs on self-hosted runners only; see README "CI and releases" for labels.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  check:
+    name: Check (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            runner: [self-hosted, Linux, X64]
+          - name: windows-x64
+            runner: [self-hosted, Windows, X64]
+          - name: macos-arm64
+            runner: [self-hosted, macOS, ARM64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        # rust-toolchain.toml pins the version; rustup installs it on first use.
+        run: rustup show active-toolchain
+
+      - name: Format
+        if: matrix.name == 'linux-x64'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --locked
+
+  coverage:
+    name: Coverage (linux-x64, 95% lines)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-llvm-cov
+        run: command -v cargo-llvm-cov >/dev/null || cargo install cargo-llvm-cov --locked
+
+      - name: Coverage gate
+        # main.rs is process wiring with no logic; it is the only exclusion.
+        run: >
+          cargo llvm-cov --all-features --workspace --locked
+          --ignore-filename-regex 'src[\\/]main\.rs'
+          --fail-under-lines 95
+          --lcov --output-path lcov.info
+
+      - name: Summary
+        if: always()
+        run: |
+          cargo llvm-cov report --ignore-filename-regex 'src[\\/]main\.rs' --summary-only >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: ignore
