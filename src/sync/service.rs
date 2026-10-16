@@ -71,23 +71,35 @@ pub struct SyncService {
     signer: Signer,
 }
 
-/// Runs a browser sign-in: provider, optional address hint, and a
-/// cancellation check polled while waiting for the browser.
+/// Runs a browser sign-in: provider, optional address hint, a callback that
+/// receives the sign-in link (so it can be copied if the browser didn't open),
+/// and a cancellation check polled while waiting for the browser.
 pub type Signer = Arc<
-    dyn Fn(Provider, Option<&EmailAddress>, &dyn Fn() -> bool) -> Result<SignedIn, OAuthError>
+    dyn Fn(
+            Provider,
+            Option<&EmailAddress>,
+            &dyn Fn(&str),
+            &dyn Fn() -> bool,
+        ) -> Result<SignedIn, OAuthError>
         + Send
         + Sync,
 >;
 
+/// Where the UI reads the sign-in link from while it waits.
+pub type LinkSlot = Arc<std::sync::Mutex<Option<String>>>;
+
 /// The production signer: the system browser and real token endpoints.
 pub fn browser_signer() -> Signer {
-    Arc::new(|provider, hint, cancelled| {
+    Arc::new(|provider, hint, show_link, cancelled| {
         let config = OAuthConfig::for_provider(provider)?;
         oauth::sign_in(
             &config,
             &ReqwestHttp::new()?,
             hint,
-            &oauth::system_browser,
+            &|url: &str| {
+                show_link(url);
+                oauth::system_browser(url)
+            },
             oauth::SIGN_IN_TIMEOUT,
             cancelled,
         )
@@ -132,9 +144,17 @@ impl SyncService {
         &self,
         provider: Provider,
         hint: Option<EmailAddress>,
+        link: LinkSlot,
         cancel: Arc<AtomicBool>,
     ) -> Result<Account, SyncError> {
-        let signed_in = (self.signer)(provider, hint.as_ref(), &|| cancel.load(Ordering::Relaxed))?;
+        let show_link = move |url: &str| {
+            if let Ok(mut slot) = link.lock() {
+                *slot = Some(url.to_owned());
+            }
+        };
+        let signed_in = (self.signer)(provider, hint.as_ref(), &show_link, &|| {
+            cancel.load(Ordering::Relaxed)
+        })?;
         let store = MailStore::open(&self.db_path)?;
         let connector = Arc::clone(&self.connector);
         add_oauth_account(

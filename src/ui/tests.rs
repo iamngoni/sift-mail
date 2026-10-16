@@ -337,7 +337,7 @@ pub(super) mod sync_ui {
         open_signing(cx, db, None)
     }
 
-    pub(super) fn open_signing(
+    pub(in crate::ui) fn open_signing(
         cx: &mut TestAppContext,
         db: &std::path::Path,
         signer: Option<crate::sync::service::Signer>,
@@ -375,118 +375,12 @@ pub(super) mod sync_ui {
             (handle, view)
         })
     }
-
-    fn fill(
-        cx: &mut TestAppContext,
-        handle: AnyWindowHandle,
-        view: &Entity<SiftApp>,
-        email: &str,
-        password: &str,
-        server: &str,
-    ) {
-        let view = view.clone();
-        cx.update_window(handle, |_, window, cx| {
-            let (e, p, s) = view.read_with(cx, |app, _| {
-                let f = app.form.as_ref().unwrap();
-                (f.email.clone(), f.password.clone(), f.server.clone())
-            });
-            e.update(cx, |state, cx| {
-                state.set_value(email.to_owned(), window, cx)
-            });
-            p.update(cx, |state, cx| {
-                state.set_value(password.to_owned(), window, cx)
-            });
-            s.update(cx, |state, cx| {
-                state.set_value(server.to_owned(), window, cx)
-            });
-        })
-        .unwrap();
-    }
-
-    #[gpui_kit::test]
-    fn adding_an_imap_account_fetches_its_mail(cx: &mut TestAppContext) {
-        let db = temp_db("add");
-        let (handle, view) = open_synced(cx, &db);
-        cx.run_until_parked();
-        assert_eq!(
-            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
-            Some("Up to date".into())
-        );
-
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        assert!(read(cx, &view, SiftApp::is_adding_account));
-        // Typing in the dialog must not trigger inbox shortcuts.
-        press(cx, handle, &["e", "3"]);
-        assert_eq!(read(cx, &view, SiftApp::view), TriageView::All);
-
-        fill(cx, handle, &view, "you@company.com", "right", "");
-        click(cx, handle, "connect");
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("Continue with Microsoft"))));
-
-        fill(cx, handle, &view, "you@fastmail.com", "wrong", "");
-        click(cx, handle, "connect");
-        cx.run_until_parked();
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("rejected the sign-in"))));
-
-        fill(cx, handle, &view, "you@fastmail.com", "right", "");
-        click(cx, handle, "connect");
-        cx.run_until_parked();
-        assert!(!read(cx, &view, SiftApp::is_adding_account));
-        assert_eq!(
-            read(cx, &view, SiftApp::listed_subjects),
-            ["Hello from IMAP"]
-        );
-        assert_eq!(
-            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
-            Some("Synced · 1 new".into())
-        );
-
-        click(cx, handle, "sync-now");
-        cx.run_until_parked();
-        assert_eq!(
-            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
-            Some("Up to date".into())
-        );
-        let _ = std::fs::remove_dir_all(db.parent().unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn the_dialog_closes_with_cancel_or_escape(cx: &mut TestAppContext) {
-        let db = temp_db("cancel");
-        let (handle, view) = open_synced(cx, &db);
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        click(cx, handle, "cancel-add");
-        assert!(!read(cx, &view, SiftApp::is_adding_account));
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        press(cx, handle, &["escape"]);
-        assert!(!read(cx, &view, SiftApp::is_adding_account));
-        let _ = std::fs::remove_dir_all(db.parent().unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn without_a_sync_service_accounts_cannot_be_saved(cx: &mut TestAppContext) {
-        let (handle, view) = open(cx, false);
-        assert!(read(cx, &view, |a| a.sync_status().is_none() && !a.is_syncing()));
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        fill(cx, handle, &view, "you@fastmail.com", "right", "");
-        click(cx, handle, "connect");
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("can't save"))));
-    }
 }
 
 pub(super) mod compose_ui {
     use super::*;
 
+    /// Adds the scripted Fastmail account through the whole Add account flow.
     pub(in crate::ui) fn add_account(
         cx: &mut TestAppContext,
         handle: AnyWindowHandle,
@@ -494,33 +388,54 @@ pub(super) mod compose_ui {
     ) {
         click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
-        sync_ui_fill(cx, handle, view, "you@fastmail.com", "right", "");
+        set_flow_field(cx, handle, view, |f| f.email.clone(), "you@fastmail.com");
+        click(cx, handle, "continue-email");
+        set_flow_field(cx, handle, view, |f| f.password.clone(), "right");
         click(cx, handle, "connect");
         cx.run_until_parked();
+        click_low(cx, handle, "setup-connect");
+        cx.run_until_parked();
+        click_low(cx, handle, "go-to-inbox");
     }
 
-    fn sync_ui_fill(
+    /// Scrolls the Add account flow to the bottom, then clicks.
+    pub(in crate::ui) fn click_low(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        id: impl Into<gpui_kit::ElementId>,
+    ) {
+        let id = id.into();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.scroll(
+                "add-account-scrim",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+                    gpui_kit::px(0.0),
+                    gpui_kit::px(-2000.0),
+                )),
+                cx,
+            );
+            window.render_frame(cx);
+            window.click(id, cx);
+        })
+        .unwrap();
+    }
+
+    /// Sets one of the Add account flow's text boxes.
+    pub(in crate::ui) fn set_flow_field(
         cx: &mut TestAppContext,
         handle: AnyWindowHandle,
         view: &Entity<SiftApp>,
-        email: &str,
-        password: &str,
-        server: &str,
+        field: impl Fn(
+            &crate::ui::add_account::AddAccountFlow,
+        ) -> Entity<gpui_kit::component::input::InputState>,
+        value: &str,
     ) {
         let view = view.clone();
         cx.update_window(handle, |_, window, cx| {
-            let (e, p, s) = view.read_with(cx, |app, _| {
-                let f = app.form.as_ref().unwrap();
-                (f.email.clone(), f.password.clone(), f.server.clone())
-            });
-            e.update(cx, |state, cx| {
-                state.set_value(email.to_owned(), window, cx)
-            });
-            p.update(cx, |state, cx| {
-                state.set_value(password.to_owned(), window, cx)
-            });
-            s.update(cx, |state, cx| {
-                state.set_value(server.to_owned(), window, cx)
+            let input = view.read_with(cx, |app, _| field(app.form.as_ref().unwrap()));
+            input.update(cx, |state, cx| {
+                state.set_value(value.to_owned(), window, cx)
             });
         })
         .unwrap();
@@ -687,127 +602,5 @@ pub(super) mod compose_ui {
         assert!(read(cx, &view, |a| a
             .compose_error()
             .is_some_and(|e| e.contains("can't send"))));
-    }
-}
-
-mod oauth_ui {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::oauth::{OAuthError, SignedIn, Tokens};
-
-    fn temp_db(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("sift-oauth-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir.join("mail.db")
-    }
-
-    fn signed() -> Result<SignedIn, OAuthError> {
-        Ok(SignedIn {
-            tokens: Tokens {
-                // The test connector accepts "right".
-                access_token: "right".into(),
-                refresh_token: "rt".into(),
-                expires_at: Utc::now() + chrono::Duration::hours(1),
-            },
-            email: crate::domain::EmailAddress::parse("you@company.com").unwrap(),
-            name: None,
-        })
-    }
-
-    #[gpui_kit::test]
-    fn microsoft_sign_in_adds_the_account(cx: &mut TestAppContext) {
-        let db = temp_db("ok");
-        let signer: crate::sync::service::Signer = Arc::new(|_, _, cancelled| {
-            if cancelled() {
-                Err(OAuthError::Cancelled)
-            } else {
-                signed()
-            }
-        });
-        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        click(cx, handle, "signin-microsoft");
-        assert!(read(cx, &view, SiftApp::is_waiting_for_browser));
-        cx.run_until_parked();
-        assert!(!read(cx, &view, SiftApp::is_adding_account));
-        assert_eq!(
-            read(cx, &view, SiftApp::listed_subjects),
-            ["Hello from IMAP"]
-        );
-        assert_eq!(
-            read(cx, &view, |a| a.toast_text().map(str::to_owned)),
-            Some("Added Work. Fetching your mail…".into())
-        );
-        let _ = std::fs::remove_dir_all(db.parent().unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn a_blocked_organisation_offers_the_it_request(cx: &mut TestAppContext) {
-        let db = temp_db("blocked");
-        let signer: crate::sync::service::Signer =
-            Arc::new(|_, _, _| Err(OAuthError::AdminApprovalRequired));
-        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        click(cx, handle, "signin-google");
-        cx.run_until_parked();
-        assert!(read(cx, &view, SiftApp::is_blocked));
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("needs to approve"))));
-        click(cx, handle, "copy-it-request");
-        let copied = cx
-            .read_from_clipboard()
-            .and_then(|c| c.text())
-            .unwrap_or_default();
-        assert!(copied.contains("Admin consent requests"));
-        let _ = std::fs::remove_dir_all(db.parent().unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn sign_in_can_be_cancelled_or_fail(cx: &mut TestAppContext) {
-        let db = temp_db("cancel");
-        let signer: crate::sync::service::Signer = Arc::new(|_, _, cancelled| {
-            if cancelled() {
-                Err(OAuthError::Cancelled)
-            } else {
-                Err(OAuthError::TimedOut)
-            }
-        });
-        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        click(cx, handle, "signin-microsoft");
-        click(cx, handle, "cancel-oauth");
-        assert!(!read(cx, &view, SiftApp::is_waiting_for_browser));
-        cx.run_until_parked();
-        assert!(read(cx, &view, |a| a.form_error().is_none()
-            && a.is_adding_account()));
-
-        click(cx, handle, "signin-microsoft");
-        cx.run_until_parked();
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("timed out"))));
-
-        // Closing the dialog mid-wait cancels too.
-        click(cx, handle, "signin-microsoft");
-        press(cx, handle, &["escape"]);
-        cx.run_until_parked();
-        assert!(!read(cx, &view, SiftApp::is_adding_account));
-        let _ = std::fs::remove_dir_all(db.parent().unwrap());
-    }
-
-    #[gpui_kit::test]
-    fn without_a_service_sign_in_explains(cx: &mut TestAppContext) {
-        let (handle, view) = open(cx, false);
-        click(cx, handle, "account-switcher");
-        click(cx, handle, "add-account");
-        click(cx, handle, "signin-microsoft");
-        assert!(read(cx, &view, |a| a
-            .form_error()
-            .is_some_and(|e| e.contains("can't save"))));
     }
 }

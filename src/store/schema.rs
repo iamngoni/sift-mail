@@ -100,6 +100,8 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE accounts ADD COLUMN last_sync TEXT;
      ALTER TABLE accounts ADD COLUMN needs_sign_in INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE accounts ADD COLUMN last_error TEXT;",
+    // 7: accounts being set up are not synced until the user finishes.
+    "ALTER TABLE accounts ADD COLUMN ready INTEGER NOT NULL DEFAULT 1;",
 ];
 
 /// Brings `conn` up to the latest schema.

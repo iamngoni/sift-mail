@@ -19,7 +19,7 @@ use crate::store::{
 };
 use crate::sync::service::SyncService;
 
-use super::accounts::AddAccountForm;
+use super::add_account::AddAccountFlow;
 use super::chrome::Overlay;
 use super::compose::ComposeForm;
 use super::settings::SettingsState;
@@ -61,7 +61,7 @@ pub struct SiftApp {
     pub(crate) syncing: bool,
     pub(crate) sync_status: Option<String>,
     /// The Add account dialog, while open.
-    pub(crate) form: Option<AddAccountForm>,
+    pub(crate) form: Option<AddAccountFlow>,
     /// The reply box under an open thread; created on first render of a thread.
     pub(crate) reply_box: Option<Entity<TextareaState>>,
     /// Why the last reply couldn't be sent.
@@ -538,8 +538,12 @@ impl SiftApp {
         if self.form.is_some() || self.compose.is_some() || replying {
             // Typing goes to the text boxes; only Escape is ours.
             if key == "escape" {
-                if self.form.is_some() {
-                    self.close_add_account(cx);
+                if self.is_waiting_for_browser() {
+                    self.cancel_oauth(cx);
+                } else if self.form.is_some() {
+                    if self.can_close_add_account() {
+                        self.close_add_account(cx);
+                    }
                 } else if self.compose.is_some() {
                     self.close_compose(cx);
                 } else {

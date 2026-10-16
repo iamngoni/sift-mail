@@ -230,28 +230,37 @@ fn service(dir: &std::path::Path) -> SyncService {
 #[test]
 fn the_service_signs_in_through_the_signer() {
     let dir = std::env::temp_dir().join(format!("sift-signin-{}", std::process::id()));
-    let ok = service(&dir).with_signer(Arc::new(|provider, hint, cancelled| {
+    let ok = service(&dir).with_signer(Arc::new(|provider, hint, show_link, cancelled| {
         assert_eq!(provider, Provider::Microsoft365);
+        show_link("https://login.example/authorize");
         assert_eq!(hint.map(EmailAddress::as_str), Some("you@company.com"));
         assert!(!cancelled());
         Ok(signed_in("you@company.com"))
     }));
     let hint = EmailAddress::parse("you@company.com").ok();
+    let link: crate::sync::service::LinkSlot = Arc::default();
     let account = ok
         .sign_in(
             Provider::Microsoft365,
             hint,
+            Arc::clone(&link),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
     assert_eq!(account.email.as_str(), "you@company.com");
+    assert_eq!(
+        link.lock().unwrap().as_deref(),
+        Some("https://login.example/authorize")
+    );
 
-    let blocked =
-        service(&dir).with_signer(Arc::new(|_, _, _| Err(OAuthError::AdminApprovalRequired)));
+    let blocked = service(&dir).with_signer(Arc::new(|_, _, _, _| {
+        Err(OAuthError::AdminApprovalRequired)
+    }));
     let err = blocked
         .sign_in(
             Provider::Microsoft365,
             None,
+            Arc::default(),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap_err();
@@ -263,7 +272,12 @@ fn the_service_signs_in_through_the_signer() {
     // The real signer needs a client ID, which tests don't have.
     let real = service(&dir);
     let err = real
-        .sign_in(Provider::Google, None, Arc::new(AtomicBool::new(true)))
+        .sign_in(
+            Provider::Google,
+            None,
+            Arc::default(),
+            Arc::new(AtomicBool::new(true)),
+        )
         .unwrap_err();
     assert!(matches!(
         err,

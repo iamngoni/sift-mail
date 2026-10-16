@@ -10,7 +10,24 @@ use gpui_kit::{AssetSource, Result, SharedString};
 pub use gpui_kit::assets::IconName as Lucide;
 
 /// The extra icons, by asset path.
-const EXTRA: [(&str, &[u8]); 13] = [
+const EXTRA: [(&str, &[u8]); 18] = [
+    (
+        "icons/cloud.svg",
+        include_bytes!("../assets/icons/cloud.svg"),
+    ),
+    (
+        "icons/key-round.svg",
+        include_bytes!("../assets/icons/key-round.svg"),
+    ),
+    ("icons/lock.svg", include_bytes!("../assets/icons/lock.svg")),
+    (
+        "icons/server.svg",
+        include_bytes!("../assets/icons/server.svg"),
+    ),
+    (
+        "icons/shield-check.svg",
+        include_bytes!("../assets/icons/shield-check.svg"),
+    ),
     (
         "icons/calendar-days.svg",
         include_bytes!("../assets/icons/calendar-days.svg"),

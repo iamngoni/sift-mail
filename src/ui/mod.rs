@@ -2,6 +2,8 @@
 //! so tests exercise exactly what users see.
 
 mod accounts;
+mod add_account;
+mod add_account_view;
 mod app;
 mod chrome;
 mod chrome_view;
@@ -10,6 +12,8 @@ mod render;
 mod settings;
 mod settings_view;
 
+#[cfg(test)]
+mod add_account_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]

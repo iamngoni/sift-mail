@@ -555,8 +555,9 @@ impl MailStore {
     /// Every IMAP account with its settings and sync cursor.
     pub fn imap_accounts(&self) -> StoreResult<Vec<(Account, ImapSettings, SyncCursor)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT account_id, host, port, username, uid_validity, last_uid, auth
-             FROM imap_accounts ORDER BY account_id",
+            "SELECT i.account_id, i.host, i.port, i.username, i.uid_validity, i.last_uid, i.auth
+             FROM imap_accounts i JOIN accounts a ON a.id = i.account_id
+             WHERE a.ready ORDER BY i.account_id",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
