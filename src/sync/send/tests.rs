@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::domain::{EmailAddress, Provider, Recipients, ReplyContext, TriageView};
 use crate::store::{Account, ThreadQuery};
+use crate::sync::imap::password_key;
 use crate::sync::imap::{MailboxInfo, RawMessage};
 use crate::sync::secrets::MemorySecrets;
 

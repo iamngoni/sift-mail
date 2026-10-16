@@ -4,15 +4,15 @@ A calm, fast, keyboard-first desktop email client for Windows, macOS and Linux,
 built in Rust on [GPUI Kit](https://gpui-kit.com) (Zed's GPUI plus Longbridge's
 component library).
 
-> **Status: early.** IMAP accounts work: add one with **Add account** (iCloud,
-> Fastmail, Gmail with an app password, or any IMAP server) and Sift fetches
-> the last 90 days of your INBOX, then checks for new mail every 3 minutes.
-> Passwords live in the OS credential store. Reply from any thread or write a
-> new message; mail goes out over SMTP with proper threading headers and a
-> copy is saved to your server's Sent folder. Reading a thread marks it read
-> on the server too. The inbox supports views, day sections, Done, Snooze,
-> read/unread and Undo from the keyboard. Done and Snooze are local to Sift
-> for now. Microsoft 365 and Google sign-in are next. Try it with sample mail:
+> **Status: early.** Add an account with **Add account**: sign in with
+> Microsoft 365 or Google in your browser (see [Sign-in setup](#sign-in-setup)),
+> or use a password for iCloud, Fastmail or any IMAP server. Sift fetches the
+> last 90 days of your INBOX, then checks for new mail every 3 minutes.
+> Passwords and sign-in tokens live in the OS credential store. Reply from any
+> thread or write a new message; mail goes out over SMTP with proper threading
+> headers and a copy is saved to your server's Sent folder. Reading a thread
+> marks it read on the server too. The inbox supports views, day sections,
+> Done, Snooze, read/unread and Undo from the keyboard. Try it with sample mail:
 >
 > ```sh
 > SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
@@ -50,6 +50,10 @@ src/
     mod.rs       SQLite mail store: threads, counts, triage actions, undo, IMAP cursors
     schema.rs    migrations (PRAGMA user_version)
     demo.rs      sample mail, only with --features demo and in tests
+  oauth/
+    mod.rs       browser sign-in: PKCE, token exchange and refresh, error mapping
+    loopback.rs  one-shot 127.0.0.1 listener for the redirect
+    http.rs      token endpoint client (rustls, timeouts, no redirects)
   sync/
     parse.rs     raw RFC 5322 mail to messages: threading, triage signals, HTML to text
     imap.rs      IMAP over TLS: incremental UID sync, read flags, Sent folder
@@ -102,6 +106,43 @@ Platform notes:
 - **macOS:** Xcode command line tools. Apple silicon only for releases.
 - **Linux:** the GPUI system libraries, for example on Debian or Ubuntu:
   `sudo apt install build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev`
+
+## Sign-in setup
+
+Microsoft 365 and Google sign in through the browser (OAuth 2.0 with PKCE;
+Sift never sees the password). Each needs an app registration whose client
+ID is baked in at build time, or set at run time with the same variable.
+Sift then talks to the normal IMAP and SMTP servers with XOAUTH2.
+
+**Microsoft 365 / Outlook.com** (Microsoft Entra admin center → App registrations → New registration):
+
+1. Supported account types: *Accounts in any organizational directory and personal Microsoft accounts*.
+2. Platform: *Mobile and desktop applications*, redirect URI `http://127.0.0.1/callback`
+   (the port is chosen at run time; Entra ignores it for loopback addresses).
+3. API permissions → Add → *APIs my organization uses* → **Office 365 Exchange Online**:
+   `IMAP.AccessAsUser.All`, `SMTP.Send`; plus Microsoft Graph `offline_access`, `openid`, `email`, `profile`.
+4. Build with the Application (client) ID:
+
+```sh
+SIFT_MS_CLIENT_ID=00000000-0000-0000-0000-000000000000 cargo build --release
+```
+
+Organisations that only allow approved apps will show Sift's *needs approval*
+screen, which offers a ready-made request for the IT team (they approve it under
+*Enterprise applications → Admin consent requests*).
+
+**Google** (Google Cloud console → APIs & Services → Credentials):
+
+1. Create an OAuth client ID of type **Desktop app**.
+2. On the OAuth consent screen, add the scope `https://mail.google.com/` and your
+   address as a test user (Google reviews this scope before public release).
+3. Build with both values:
+
+```sh
+SIFT_GOOGLE_CLIENT_ID=… SIFT_GOOGLE_CLIENT_SECRET=… cargo build --release
+```
+
+Google's "secret" for desktop apps is not confidential; Google requires it anyway.
 
 ## Quality gates
 

@@ -5,6 +5,8 @@
 //! executor with their own store connection; results come back to the UI
 //! thread, which then reloads from the store.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -18,7 +20,9 @@ use gpui_kit::{
 
 use super::app::{SiftApp, Toast};
 use crate::domain::{EmailAddress, Host, ImapSettings, Provider};
+use crate::oauth::OAuthError;
 use crate::sync::AddAccountRequest;
+use crate::sync::imap::SyncError;
 use crate::theme::tokens::{Palette, radius, text};
 
 /// How often accounts sync while the app is open.
@@ -31,6 +35,10 @@ pub(crate) struct AddAccountForm {
     pub(crate) server: Entity<InputState>,
     pub(crate) error: Option<String>,
     pub(crate) busy: bool,
+    /// Set while waiting for the browser; flip it to cancel.
+    pub(crate) waiting: Option<(Provider, Arc<AtomicBool>)>,
+    /// The organisation blocked the app; show the message for IT.
+    pub(crate) blocked: bool,
 }
 
 /// Turns what was typed into a request, or a message to show under the form.
@@ -40,8 +48,8 @@ pub fn validate(email: &str, password: &str, server: &str) -> Result<AddAccountR
     let server = server.trim();
     if provider == Provider::Microsoft365 && server.is_empty() {
         return Err(
-            "Microsoft 365 and Outlook.com accounts need browser sign-in, which is coming \
-                    next. If this account uses IMAP, enter its server below."
+            "Use Continue with Microsoft above. If this account uses IMAP instead, \
+                    enter its server below."
                 .to_owned(),
         );
     }
@@ -66,6 +74,20 @@ pub fn validate(email: &str, password: &str, server: &str) -> Result<AddAccountR
         settings,
         password: password.to_owned(),
     })
+}
+
+/// The message the blocked screen offers to copy for an IT team.
+pub fn it_request() -> String {
+    "Hi IT team,
+
+I'd like to use Sift Mail as my email app with my Microsoft 365 \n     account. Microsoft says it needs admin approval.
+
+It asks to read and send my mail \n     (IMAP and SMTP) and to stay signed in.
+
+Could you approve it in Microsoft Entra \n     (Enterprise applications > Admin consent requests)?
+
+Thanks!"
+        .to_owned()
 }
 
 /// "Gmail", "iCloud", or the capitalised first part of the domain.
@@ -169,14 +191,250 @@ impl SiftApp {
             server,
             error: None,
             busy: false,
+            waiting: None,
+            blocked: false,
         });
         cx.notify();
     }
 
-    /// Closes the dialog and returns focus to the inbox.
+    /// Closes the dialog and returns focus to the inbox. Cancels a pending
+    /// browser sign-in so the listener stops waiting.
     pub fn close_add_account(&mut self, cx: &mut Context<Self>) {
+        if let Some((_, cancel)) = self.form.as_ref().and_then(|f| f.waiting.as_ref()) {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.form = None;
         cx.notify();
+    }
+
+    /// Whether the dialog is waiting for the browser.
+    pub fn is_waiting_for_browser(&self) -> bool {
+        self.form.as_ref().is_some_and(|f| f.waiting.is_some())
+    }
+
+    /// Whether the organisation blocked the last sign-in.
+    pub fn is_blocked(&self) -> bool {
+        self.form.as_ref().is_some_and(|f| f.blocked)
+    }
+
+    /// Opens the provider's sign-in page and waits for it in the background.
+    pub fn start_oauth(&mut self, provider: Provider, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.form.as_mut() else {
+            return;
+        };
+        if form.waiting.is_some() {
+            return;
+        }
+        let Some(service) = self.sync.clone() else {
+            form.error = Some("Sift can't save accounts in this session.".to_owned());
+            cx.notify();
+            return;
+        };
+        let hint = EmailAddress::parse(&form.email.read(cx).value()).ok();
+        let cancel = Arc::new(AtomicBool::new(false));
+        form.waiting = Some((provider, Arc::clone(&cancel)));
+        form.blocked = false;
+        form.error = None;
+        cx.notify();
+        let task = cx
+            .background_executor()
+            .spawn(async move { service.sign_in(provider, hint, cancel) });
+        let focus = self.focus.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |app, window, cx| {
+                match result {
+                    Ok(account) => {
+                        app.form = None;
+                        app.toast = Some(Toast {
+                            text: format!("Added {}. Fetching your mail…", account.name),
+                            undo: None,
+                        });
+                        focus.focus(window, cx);
+                        app.reload();
+                        app.start_sync(cx);
+                    }
+                    Err(error) => {
+                        if let Some(form) = app.form.as_mut() {
+                            form.waiting = None;
+                            match error {
+                                SyncError::OAuth(OAuthError::Cancelled) => {}
+                                SyncError::OAuth(OAuthError::AdminApprovalRequired) => {
+                                    form.blocked = true;
+                                    form.error =
+                                        Some(OAuthError::AdminApprovalRequired.to_string());
+                                }
+                                other => form.error = Some(other.to_string()),
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+            })
+        })
+        .detach();
+    }
+
+    /// Stops waiting for the browser.
+    pub fn cancel_oauth(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = self.form.as_mut()
+            && let Some((_, cancel)) = form.waiting.take()
+        {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        cx.notify();
+    }
+
+    /// Puts the request for IT on the clipboard.
+    pub fn copy_it_request(&mut self, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(it_request()));
+        self.toast = Some(Toast {
+            text: "Copied the request for your IT team".to_owned(),
+            undo: None,
+        });
+        cx.notify();
+    }
+
+    fn oauth_section(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = self.form.as_ref() else {
+            return div().into_any_element();
+        };
+        if let Some((provider, _)) = &form.waiting {
+            let name = if *provider == Provider::Google {
+                "Google"
+            } else {
+                "Microsoft"
+            };
+            return div()
+                .p(px(14.0))
+                .rounded(px(radius::BUTTON))
+                .bg(p.accent_soft)
+                .flex()
+                .items_center()
+                .gap(px(12.0))
+                .child(
+                    Icon::new(IconName::LoaderCircle)
+                        .size(px(18.0))
+                        .text_color(p.accent_text),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .child(format!("Finish signing in with {name} in your browser…")),
+                )
+                .child(
+                    div()
+                        .id("cancel-oauth")
+                        .h(px(28.0))
+                        .px(px(10.0))
+                        .flex()
+                        .items_center()
+                        .rounded(px(7.0))
+                        .border_1()
+                        .border_color(p.line_strong)
+                        .child("Cancel")
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.cancel_oauth(cx)))
+                        .test_support(),
+                )
+                .into_any_element();
+        }
+        let hover = p.bg_hover;
+        let button =
+            |id: &'static str, label: &'static str, provider: Provider, cx: &mut Context<Self>| {
+                div()
+                    .id(id)
+                    .flex_1()
+                    .h(px(40.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(8.0))
+                    .rounded(px(radius::BUTTON))
+                    .border_1()
+                    .border_color(p.line_strong)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .hover(move |s| s.bg(hover))
+                    .child(
+                        Icon::new(if provider == Provider::Google {
+                            IconName::Globe
+                        } else {
+                            IconName::Building2
+                        })
+                        .size(px(16.0)),
+                    )
+                    .child(label)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.start_oauth(provider, window, cx);
+                    }))
+                    .test_support()
+            };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(8.0))
+                    .child(button(
+                        "signin-microsoft",
+                        "Continue with Microsoft",
+                        Provider::Microsoft365,
+                        cx,
+                    ))
+                    .child(button(
+                        "signin-google",
+                        "Continue with Google",
+                        Provider::Google,
+                        cx,
+                    )),
+            )
+            .when(form.blocked, |d| {
+                d.child(
+                    div()
+                        .p(px(12.0))
+                        .rounded(px(radius::BUTTON))
+                        .bg(p.bg_subtle)
+                        .border_1()
+                        .border_color(p.line_strong)
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(div().text_size(px(text::META)).text_color(p.ink_2).child(
+                            "Microsoft 365 only lets approved apps connect. Nothing was \
+                                        connected and no mail left your account. Send your IT team \
+                                        this request:",
+                        ))
+                        .child(
+                            div()
+                                .id("copy-it-request")
+                                .h(px(28.0))
+                                .px(px(10.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(p.line_strong)
+                                .child("Copy request for IT")
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.copy_it_request(cx)
+                                }))
+                                .test_support(),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .text_size(px(text::META))
+                    .text_color(p.ink_3)
+                    .child(div().flex_1().h(px(1.0)).bg(p.line))
+                    .child("or use a password (IMAP)")
+                    .child(div().flex_1().h(px(1.0)).bg(p.line)),
+            )
+            .into_any_element()
     }
 
     /// Validates the dialog, then checks the sign-in in the background.
@@ -290,10 +548,11 @@ impl SiftApp {
                                     .child("Add an account"),
                             )
                             .child(div().text_color(p.ink_3).child(
-                                "IMAP accounts such as iCloud, Fastmail, or Gmail with an app \
-                                 password. Microsoft 365 and Google sign-in are coming next.",
+                                "Sign in with your provider, or use a password for any IMAP \
+                                 account.",
                             )),
                     )
+                    .child(self.oauth_section(p, cx))
                     .child(field("Email", &form.email, "field-email"))
                     .child(field("Password", &form.password, "field-password"))
                     .child(field("Server", &form.server, "field-server"))
@@ -366,7 +625,7 @@ mod tests {
         assert!(
             validate("you@company.com", "pw", "")
                 .unwrap_err()
-                .contains("browser sign-in")
+                .contains("Continue with Microsoft")
         );
         assert!(
             validate("you@fastmail.com", "", "")

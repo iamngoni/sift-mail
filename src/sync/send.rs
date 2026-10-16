@@ -7,7 +7,8 @@
 
 use chrono::{DateTime, Utc};
 
-use super::imap::{MailSession, SyncError, password_key};
+use super::imap::{MailSession, SyncError};
+use super::secret_for;
 use super::secrets::Secrets;
 use super::smtp::{From, Sender, build};
 use crate::domain::{
@@ -49,9 +50,7 @@ pub fn send_message<S: MailSession>(
     let smtp = store
         .smtp_settings(request.account)?
         .ok_or_else(|| SyncError::Protocol("this account can't send mail yet".to_owned()))?;
-    let password = secrets
-        .get(&password_key(&account.email))?
-        .ok_or(SyncError::NoPassword)?;
+    let password = secret_for(secrets, &account, &imap, now)?;
 
     let built = build(
         &From {
@@ -121,10 +120,8 @@ pub fn write_read<S: MailSession>(
     if uids.is_empty() {
         return Ok(0);
     }
-    let password = secrets
-        .get(&password_key(&account.email))?
-        .ok_or(SyncError::NoPassword)?;
-    connect(&imap, &password)?.set_seen(&uids, read)?;
+    let secret = secret_for(secrets, &account, &imap, chrono::Utc::now())?;
+    connect(&imap, &secret)?.set_seen(&uids, read)?;
     Ok(uids.len())
 }
 

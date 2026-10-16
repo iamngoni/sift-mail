@@ -9,12 +9,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use lettre::message::header::ContentType;
 use lettre::message::{Mailbox, MessageBuilder};
-use lettre::transport::smtp::authentication::Credentials;
+use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{CertificateStore, Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 
 use super::imap::SyncError;
-use crate::domain::{Draft, EmailAddress, SmtpSettings};
+use crate::domain::{AuthMethod, Draft, EmailAddress, SmtpSettings};
 
 /// Sends a built message. Arguments: server, login, password, message.
 pub type Sender =
@@ -109,6 +109,10 @@ pub fn smtp_sender() -> Sender {
                 .port(settings.port)
                 .tls(tls)
                 .credentials(Credentials::new(username.to_owned(), password.to_owned()))
+                .authentication(match settings.auth {
+                    AuthMethod::Password => vec![Mechanism::Plain, Mechanism::Login],
+                    AuthMethod::OAuth => vec![Mechanism::Xoauth2],
+                })
                 .build();
             transport.send(message).map(|_| ()).map_err(|e| {
                 if e.is_permanent() && e.to_string().contains("535") {
@@ -208,6 +212,7 @@ mod tests {
         let settings = SmtpSettings {
             host: crate::domain::Host::parse("localhost.invalid").unwrap(),
             port: 9,
+            auth: AuthMethod::OAuth,
         };
         let me = me();
         let draft = Draft::new(Recipients::parse("a@x.com").unwrap(), "Hi", "Hello").unwrap();

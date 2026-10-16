@@ -326,6 +326,14 @@ mod sync_ui {
         cx: &mut TestAppContext,
         db: &std::path::Path,
     ) -> (AnyWindowHandle, Entity<SiftApp>) {
+        open_signing(cx, db, None)
+    }
+
+    pub(super) fn open_signing(
+        cx: &mut TestAppContext,
+        db: &std::path::Path,
+        signer: Option<crate::sync::service::Signer>,
+    ) -> (AnyWindowHandle, Entity<SiftApp>) {
         let connector: Connector = Arc::new(|_, password: &str| {
             if password == "right" {
                 Ok(Box::new(Inbox) as BoxedSession)
@@ -346,6 +354,10 @@ mod sync_ui {
                 }
             }),
         );
+        let service = match signer {
+            Some(signer) => service.with_signer(signer),
+            None => service,
+        };
         let db = db.to_path_buf();
         cx.update(|cx| {
             gpui_kit::init(cx);
@@ -403,7 +415,7 @@ mod sync_ui {
         click(cx, handle, "connect");
         assert!(read(cx, &view, |a| a
             .form_error()
-            .is_some_and(|e| e.contains("browser sign-in"))));
+            .is_some_and(|e| e.contains("Continue with Microsoft"))));
 
         fill(cx, handle, &view, "you@fastmail.com", "wrong", "");
         click(cx, handle, "connect");
@@ -658,5 +670,123 @@ mod compose_ui {
         assert!(read(cx, &view, |a| a
             .compose_error()
             .is_some_and(|e| e.contains("can't send"))));
+    }
+}
+
+mod oauth_ui {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::oauth::{OAuthError, SignedIn, Tokens};
+
+    fn temp_db(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sift-oauth-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join("mail.db")
+    }
+
+    fn signed() -> Result<SignedIn, OAuthError> {
+        Ok(SignedIn {
+            tokens: Tokens {
+                // The test connector accepts "right".
+                access_token: "right".into(),
+                refresh_token: "rt".into(),
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+            },
+            email: crate::domain::EmailAddress::parse("you@company.com").unwrap(),
+            name: None,
+        })
+    }
+
+    #[gpui_kit::test]
+    fn microsoft_sign_in_adds_the_account(cx: &mut TestAppContext) {
+        let db = temp_db("ok");
+        let signer: crate::sync::service::Signer = Arc::new(|_, _, cancelled| {
+            if cancelled() {
+                Err(OAuthError::Cancelled)
+            } else {
+                signed()
+            }
+        });
+        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "add-account");
+        click(cx, handle, "signin-microsoft");
+        assert!(read(cx, &view, SiftApp::is_waiting_for_browser));
+        cx.run_until_parked();
+        assert!(!read(cx, &view, SiftApp::is_adding_account));
+        assert_eq!(
+            read(cx, &view, SiftApp::listed_subjects),
+            ["Hello from IMAP"]
+        );
+        assert_eq!(
+            read(cx, &view, |a| a.toast_text().map(str::to_owned)),
+            Some("Added Work. Fetching your mail…".into())
+        );
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn a_blocked_organisation_offers_the_it_request(cx: &mut TestAppContext) {
+        let db = temp_db("blocked");
+        let signer: crate::sync::service::Signer =
+            Arc::new(|_, _, _| Err(OAuthError::AdminApprovalRequired));
+        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "add-account");
+        click(cx, handle, "signin-google");
+        cx.run_until_parked();
+        assert!(read(cx, &view, SiftApp::is_blocked));
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("needs to approve"))));
+        click(cx, handle, "copy-it-request");
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|c| c.text())
+            .unwrap_or_default();
+        assert!(copied.contains("Admin consent requests"));
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn sign_in_can_be_cancelled_or_fail(cx: &mut TestAppContext) {
+        let db = temp_db("cancel");
+        let signer: crate::sync::service::Signer = Arc::new(|_, _, cancelled| {
+            if cancelled() {
+                Err(OAuthError::Cancelled)
+            } else {
+                Err(OAuthError::TimedOut)
+            }
+        });
+        let (handle, view) = super::sync_ui::open_signing(cx, &db, Some(signer));
+        click(cx, handle, "add-account");
+        click(cx, handle, "signin-microsoft");
+        click(cx, handle, "cancel-oauth");
+        assert!(!read(cx, &view, SiftApp::is_waiting_for_browser));
+        cx.run_until_parked();
+        assert!(read(cx, &view, |a| a.form_error().is_none()
+            && a.is_adding_account()));
+
+        click(cx, handle, "signin-microsoft");
+        cx.run_until_parked();
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("timed out"))));
+
+        // Closing the dialog mid-wait cancels too.
+        click(cx, handle, "signin-microsoft");
+        press(cx, handle, &["escape"]);
+        cx.run_until_parked();
+        assert!(!read(cx, &view, SiftApp::is_adding_account));
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn without_a_service_sign_in_explains(cx: &mut TestAppContext) {
+        let (handle, view) = open(cx, false);
+        click(cx, handle, "add-account");
+        click(cx, handle, "signin-microsoft");
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("can't save"))));
     }
 }

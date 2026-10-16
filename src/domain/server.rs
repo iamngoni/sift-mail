@@ -44,6 +44,33 @@ impl fmt::Display for Host {
     }
 }
 
+/// How an account proves who it is to its mail servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthMethod {
+    /// A password or app password, sent with LOGIN / AUTH PLAIN over TLS.
+    #[default]
+    Password,
+    /// An OAuth access token, sent with SASL XOAUTH2.
+    OAuth,
+}
+
+impl AuthMethod {
+    /// Stable storage key.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::OAuth => "oauth",
+        }
+    }
+
+    /// Reads a key written by [`AuthMethod::key`].
+    pub(crate) fn from_key(key: &str) -> Option<Self> {
+        [Self::Password, Self::OAuth]
+            .into_iter()
+            .find(|m| m.key() == key)
+    }
+}
+
 /// How to reach and log in to an IMAP server. Always TLS: port 993 uses
 /// implicit TLS, any other port must offer STARTTLS. Plain text is never used.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +81,8 @@ pub struct ImapSettings {
     pub port: u16,
     /// Login name, usually the full address.
     pub username: String,
+    /// Password or OAuth.
+    pub auth: AuthMethod,
 }
 
 impl ImapSettings {
@@ -75,6 +104,7 @@ impl ImapSettings {
             host: Host(host),
             port: 993,
             username: email.as_str().to_owned(),
+            auth: AuthMethod::Password,
         }
     }
 
@@ -92,6 +122,8 @@ pub struct SmtpSettings {
     pub host: Host,
     /// Server port, 465 or 587.
     pub port: u16,
+    /// Same as the account's IMAP sign-in.
+    pub auth: AuthMethod,
 }
 
 impl SmtpSettings {
@@ -114,6 +146,7 @@ impl SmtpSettings {
             // Built from validated host names above, so this always parses.
             host: Host::parse(&host).unwrap_or_else(|_| imap.host.clone()),
             port,
+            auth: imap.auth,
         }
     }
 

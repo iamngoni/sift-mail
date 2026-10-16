@@ -49,6 +49,8 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE messages ADD COLUMN refs TEXT NOT NULL DEFAULT '';
      ALTER TABLE imap_accounts ADD COLUMN smtp_host TEXT;
      ALTER TABLE imap_accounts ADD COLUMN smtp_port INTEGER;",
+    // 4: how each account signs in (password or OAuth).
+    "ALTER TABLE imap_accounts ADD COLUMN auth TEXT NOT NULL DEFAULT 'password';",
 ];
 
 /// Brings `conn` up to the latest schema.
