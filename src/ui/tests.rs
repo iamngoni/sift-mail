@@ -527,7 +527,7 @@ pub(super) mod compose_ui {
             && !a.is_snoozing()));
 
         type_reply(cx, handle, &view, "   ");
-        press(cx, handle, &["ctrl-enter"]);
+        press(cx, handle, &["secondary-enter"]);
         assert_eq!(
             read(cx, &view, |a| a.compose_error().map(str::to_owned)),
             Some("Write something before sending.".into())
@@ -580,7 +580,7 @@ pub(super) mod compose_ui {
         add_account(cx, handle, &view);
         click(cx, handle, "new-message");
         compose(cx, handle, &view, "", "Hi", "Hello");
-        press(cx, handle, &["ctrl-enter"]);
+        press(cx, handle, &["secondary-enter"]);
         assert_eq!(
             read(cx, &view, |a| a.compose_error().map(str::to_owned)),
             Some("Add at least one recipient.".into())
