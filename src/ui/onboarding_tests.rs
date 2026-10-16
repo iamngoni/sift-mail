@@ -145,7 +145,7 @@ fn a_first_run_walks_through_every_step(cx: &mut TestAppContext) {
     press(cx, handle, &["enter"]);
 
     assert_eq!(step(cx, &view), Some(OnboardStep::Keys));
-    press(cx, handle, &["j", "j", "k", "e", "ctrl-k"]);
+    press(cx, handle, &["j", "j", "k", "e", "secondary-k"]);
     assert_eq!(
         read(cx, &view, |a| a
             .onboarding
