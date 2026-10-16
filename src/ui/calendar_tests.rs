@@ -73,7 +73,7 @@ fn the_week_navigates_and_closes(cx: &mut TestAppContext) {
     press(cx, handle, &["right", "right", "t"]);
     assert_eq!(read(cx, &view, |a| a.calendar.as_ref().unwrap().week), 0);
     click(cx, handle, "this-week");
-    press(cx, handle, &["left", "x", "ctrl-k"]);
+    press(cx, handle, &["left", "x", "secondary-k"]);
     assert_eq!(read(cx, &view, |a| a.overlay_name()), None);
     click(cx, handle, "tab-mail");
     assert!(!read(cx, &view, SiftApp::calendar_open));

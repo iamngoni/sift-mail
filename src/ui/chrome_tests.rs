@@ -134,7 +134,7 @@ fn the_account_switcher_filters_the_inbox(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_palette_searches_mail_and_runs_commands(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, true);
-    press(cx, handle, &["ctrl-k"]);
+    press(cx, handle, &["secondary-k"]);
     assert_eq!(overlay(cx, &view), Some("palette"));
     let all = read(cx, &view, SiftApp::palette_labels);
     assert_eq!(all.len(), Command::ALL.len(), "commands only when empty");
@@ -158,11 +158,11 @@ fn the_palette_searches_mail_and_runs_commands(cx: &mut TestAppContext) {
     press(cx, handle, &["enter"]);
     assert_eq!(read(cx, &view, SiftApp::view), TriageView::Meetings);
 
-    press(cx, handle, &["ctrl-k"]);
+    press(cx, handle, &["secondary-k"]);
     typing(cx, handle, "zzzz");
     assert!(read(cx, &view, SiftApp::palette_labels).is_empty());
-    press(cx, handle, &["enter", "ctrl-k"]);
-    assert_eq!(overlay(cx, &view), None, "ctrl-k closes it again");
+    press(cx, handle, &["enter", "secondary-k"]);
+    assert_eq!(overlay(cx, &view), None, "the palette shortcut closes it again");
 
     click(cx, handle, "open-palette");
     click(cx, handle, ("palette-item", 0usize));
