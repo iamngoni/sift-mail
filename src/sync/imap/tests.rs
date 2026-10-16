@@ -103,6 +103,12 @@ impl MailSession for FakeSession {
             .filter_map(|u| self.messages.get(u).cloned())
             .collect())
     }
+    fn set_seen(&mut self, _: &[u32], _: bool) -> Result<(), SyncError> {
+        Ok(())
+    }
+    fn append_sent(&mut self, _: &[u8]) -> Result<bool, SyncError> {
+        Ok(false)
+    }
 }
 
 fn setup() -> (MailStore, Account) {

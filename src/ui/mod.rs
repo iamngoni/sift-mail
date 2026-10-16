@@ -3,6 +3,7 @@
 
 mod accounts;
 mod app;
+mod compose;
 mod render;
 
 #[cfg(test)]

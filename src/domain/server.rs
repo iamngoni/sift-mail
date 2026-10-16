@@ -84,6 +84,45 @@ impl ImapSettings {
     }
 }
 
+/// How to send mail for an account. Always TLS: 465 is implicit TLS, any
+/// other port must offer STARTTLS. The login matches the IMAP one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmtpSettings {
+    /// Server name.
+    pub host: Host,
+    /// Server port, 465 or 587.
+    pub port: u16,
+}
+
+impl SmtpSettings {
+    /// Best-known outgoing settings for an address, matching
+    /// [`ImapSettings::for_address`]. A custom IMAP host `imap.x` maps to `smtp.x`.
+    pub fn for_imap(email: &EmailAddress, provider: Provider, imap: &ImapSettings) -> Self {
+        let (host, port) = match (provider, email.domain()) {
+            (Provider::ICloud, _) => ("smtp.mail.me.com".to_owned(), 587),
+            (Provider::Google, _) => ("smtp.gmail.com".to_owned(), 465),
+            (Provider::Microsoft365, _) => ("smtp.office365.com".to_owned(), 587),
+            (_, "yahoo.com") => ("smtp.mail.yahoo.com".to_owned(), 465),
+            (_, "fastmail.com") => ("smtp.fastmail.com".to_owned(), 465),
+            _ => {
+                let imap_host = imap.host.as_str();
+                let base = imap_host.strip_prefix("imap.").unwrap_or(imap_host);
+                (format!("smtp.{base}"), 465)
+            }
+        };
+        Self {
+            // Built from validated host names above, so this always parses.
+            host: Host::parse(&host).unwrap_or_else(|_| imap.host.clone()),
+            port,
+        }
+    }
+
+    /// Whether the connection starts with TLS (465) or upgrades with STARTTLS.
+    pub fn implicit_tls(&self) -> bool {
+        self.port == 465
+    }
+}
+
 /// Sync progress for one mailbox. When the server's UIDVALIDITY changes, every
 /// UID is reassigned, so the cursor resets and the mailbox is fetched again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -100,6 +139,38 @@ mod tests {
 
     fn email(s: &str) -> EmailAddress {
         EmailAddress::parse(s).unwrap()
+    }
+
+    #[test]
+    fn smtp_settings_follow_the_provider_or_the_imap_host() {
+        let cases = [
+            ("you@icloud.com", Provider::ICloud, "smtp.mail.me.com", 587),
+            ("you@gmail.com", Provider::Google, "smtp.gmail.com", 465),
+            (
+                "you@company.com",
+                Provider::Microsoft365,
+                "smtp.office365.com",
+                587,
+            ),
+            ("you@yahoo.com", Provider::Imap, "smtp.mail.yahoo.com", 465),
+            ("you@fastmail.com", Provider::Imap, "smtp.fastmail.com", 465),
+            ("you@example.org", Provider::Imap, "smtp.example.org", 465),
+        ];
+        for (address, provider, host, port) in cases {
+            let e = email(address);
+            let imap = ImapSettings::for_address(&e, provider);
+            let smtp = SmtpSettings::for_imap(&e, provider, &imap);
+            assert_eq!((smtp.host.as_str(), smtp.port), (host, port), "{address}");
+        }
+        let e = email("you@company.com");
+        let custom = ImapSettings {
+            host: Host::parse("mail.company.com").unwrap(),
+            ..ImapSettings::for_address(&e, Provider::Imap)
+        };
+        let smtp = SmtpSettings::for_imap(&e, Provider::Imap, &custom);
+        assert_eq!(smtp.host.as_str(), "smtp.mail.company.com");
+        assert!(smtp.implicit_tls());
+        assert!(!SmtpSettings { port: 587, ..smtp }.implicit_tls());
     }
 
     #[test]

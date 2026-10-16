@@ -27,7 +27,8 @@ const READER_WIDTH: f32 = 720.0;
 const LIST_WIDTH: f32 = 1000.0;
 
 impl Render for SiftApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_reply_box(window, cx);
         let sift = *SiftTheme::get(cx);
         let p = *sift.palette();
         let body = match &self.open {
@@ -71,6 +72,9 @@ impl Render for SiftApp {
                     })
                     .when(self.form.is_some(), |area| {
                         area.child(self.add_account_dialog(&p, cx))
+                    })
+                    .when(self.compose.is_some(), |area| {
+                        area.child(self.compose_dialog(&p, cx))
                     }),
             )
     }
@@ -148,18 +152,36 @@ impl SiftApp {
                 div()
                     .id("add-account")
                     .h(px(size::ICON_BUTTON))
-                    .px(px(12.0))
+                    .px(px(10.0))
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .rounded_full()
-                    .bg(p.primary)
-                    .text_color(p.primary_ink)
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .rounded(px(radius::BUTTON))
+                    .text_color(p.ink_2)
+                    .hover(move |s| s.bg(hover))
                     .child(Icon::new(IconName::Plus).size(px(14.0)))
                     .child("Add account")
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.open_add_account(window, cx);
+                    }))
+                    .test_support(),
+            )
+            .child(
+                div()
+                    .id("new-message")
+                    .h(px(size::ICON_BUTTON))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .rounded_full()
+                    .bg(p.primary)
+                    .text_color(p.primary_ink)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("New")
+                    .child(div().text_size(px(text::SMALL)).opacity(0.8).child("C"))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_compose(window, cx);
                     }))
                     .test_support(),
             )
@@ -581,6 +603,7 @@ impl SiftApp {
                             .overflow_hidden()
                             .children(messages),
                     )
+                    .child(self.reply_card(p, cx))
                     .child(div().h(px(96.0))),
             )
             .into_any_element()

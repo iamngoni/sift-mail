@@ -11,8 +11,10 @@ use chrono::{DateTime, Utc};
 
 use super::imap::{MailSession, MailboxInfo, RawMessage, SyncError, connect};
 use super::secrets::Secrets;
+use super::send::{SendOutcome, SendRequest, send_message, write_read};
+use super::smtp::{Sender, smtp_sender};
 use super::{AddAccountRequest, add_imap_account, sync_all};
-use crate::domain::ImapSettings;
+use crate::domain::{ImapSettings, ThreadRef};
 use crate::store::{Account, MailStore};
 
 /// A boxed session, so tests can swap the network for a fake.
@@ -34,6 +36,14 @@ impl MailSession for BoxedSession {
     fn uid_fetch(&mut self, uids: &[u32]) -> Result<Vec<RawMessage>, SyncError> {
         (**self).uid_fetch(uids)
     }
+
+    fn set_seen(&mut self, uids: &[u32], seen: bool) -> Result<(), SyncError> {
+        (**self).set_seen(uids, seen)
+    }
+
+    fn append_sent(&mut self, raw: &[u8]) -> Result<bool, SyncError> {
+        (**self).append_sent(raw)
+    }
 }
 
 /// Result of one background sync pass, for the status line.
@@ -53,15 +63,22 @@ pub struct SyncService {
     db_path: PathBuf,
     secrets: Arc<dyn Secrets>,
     connector: Connector,
+    sender: Sender,
 }
 
 impl SyncService {
-    /// A service over `db_path` using `secrets` and a custom connector.
-    pub fn new(db_path: PathBuf, secrets: Arc<dyn Secrets>, connector: Connector) -> Self {
+    /// A service over `db_path` using `secrets`, a custom IMAP connector and SMTP sender.
+    pub fn new(
+        db_path: PathBuf,
+        secrets: Arc<dyn Secrets>,
+        connector: Connector,
+        sender: Sender,
+    ) -> Self {
         Self {
             db_path,
             secrets,
             connector,
+            sender,
         }
     }
 
@@ -70,7 +87,7 @@ impl SyncService {
         let connector: Connector = Arc::new(|settings: &ImapSettings, password: &str| {
             connect(settings, password).map(|s| Box::new(s) as BoxedSession)
         });
-        Self::new(db_path, secrets, connector)
+        Self::new(db_path, secrets, connector, smtp_sender())
     }
 
     /// Checks the sign-in and saves the account. Blocking; run off the UI thread.
@@ -82,6 +99,34 @@ impl SyncService {
             self.secrets.as_ref(),
             &request,
             move |s: &ImapSettings, p: &str| connector(s, p),
+        )
+    }
+
+    /// Sends a message and records it. Blocking; run off the UI thread.
+    pub fn send(&self, request: SendRequest) -> Result<SendOutcome, SyncError> {
+        let store = MailStore::open(&self.db_path)?;
+        let connector = Arc::clone(&self.connector);
+        send_message(
+            &store,
+            self.secrets.as_ref(),
+            &self.sender,
+            move |s: &ImapSettings, p: &str| connector(s, p),
+            &request,
+            Utc::now(),
+            rand_u64(),
+        )
+    }
+
+    /// Writes a thread's read state to the server. Blocking; run off the UI thread.
+    pub fn write_read(&self, thread: ThreadRef, read: bool) -> Result<usize, SyncError> {
+        let store = MailStore::open(&self.db_path)?;
+        let connector = Arc::clone(&self.connector);
+        write_read(
+            &store,
+            self.secrets.as_ref(),
+            move |s: &ImapSettings, p: &str| connector(s, p),
+            &thread,
+            read,
         )
     }
 
@@ -114,6 +159,18 @@ impl SyncService {
         }
         Ok(summary)
     }
+}
+
+/// A random value for Message-IDs, from the OS-seeded hasher (no extra crate).
+fn rand_u64() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    hasher.finish()
 }
 
 impl SyncSummary {
@@ -153,6 +210,12 @@ mod tests {
                 .cloned()
                 .collect())
         }
+        fn set_seen(&mut self, _: &[u32], _: bool) -> Result<(), SyncError> {
+            Ok(())
+        }
+        fn append_sent(&mut self, _: &[u8]) -> Result<bool, SyncError> {
+            Ok(false)
+        }
     }
 
     fn message(uid: u32) -> RawMessage {
@@ -176,6 +239,7 @@ mod tests {
             dir.join("mail.db"),
             Arc::new(MemorySecrets::default()),
             connector,
+            Arc::new(|_, _, _, _| Ok(())),
         )
     }
 

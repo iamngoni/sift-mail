@@ -8,7 +8,9 @@
 pub mod imap;
 pub mod parse;
 pub mod secrets;
+pub mod send;
 pub mod service;
+pub mod smtp;
 
 use chrono::{DateTime, Utc};
 

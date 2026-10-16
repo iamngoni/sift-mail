@@ -175,6 +175,8 @@ pub fn seed(store: &MailStore, now: DateTime<Utc>) -> StoreResult<bool> {
             is_read: sample.read,
             has_attachments: sample.attachments,
             signals: sample.signals,
+            message_id: Some(format!("{}@demo.sift", sample.remote)),
+            references: Vec::new(),
         })?;
     }
     Ok(true)
