@@ -6,16 +6,18 @@
 //! whole threads so a conversation is never half done.
 
 mod files;
+mod memo;
 mod prefs;
 mod schema;
 mod search;
 
 pub use files::{Attachment, safe_name};
+pub use memo::CONTACT_LIMIT;
 pub use prefs::{
     ACCOUNT_COLOURS, AccountHealth, AccountSettings, CustomView, CustomViewId, NotifyLevel, Pref,
     SyncRange, describe_view,
 };
-pub use search::{SEARCH_LIMIT, fts_query};
+pub use search::{SEARCH_LIMIT, any_query, fts_query};
 
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;

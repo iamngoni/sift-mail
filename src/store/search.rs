@@ -13,6 +13,24 @@ use super::{MailStore, StoreError, StoreResult, ThreadSummary, raw_summary};
 /// Most results a search returns.
 pub const SEARCH_LIMIT: usize = 50;
 
+/// Words too common to help find a thread.
+const FILLER: [&str; 34] = [
+    "what", "when", "where", "who", "why", "how", "does", "do", "did", "is", "are", "was", "the",
+    "a", "an", "to", "from", "for", "of", "on", "in", "me", "my", "i", "need", "needs", "about",
+    "any", "anything", "with", "this", "that", "it", "or",
+];
+
+/// Like [`fts_query`], but any meaningful word may match. `None` if only filler.
+pub fn any_query(text: &str) -> Option<String> {
+    let words: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|w| w.chars().count() > 1 && !FILLER.contains(&w.as_str()))
+        .map(|w| format!("\"{w}\"*"))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" OR "))
+}
+
 /// Turns typed text into a safe FTS5 query: every word must appear, each
 /// matched as a prefix (`"tom"*`). `None` if there's nothing to search for.
 pub fn fts_query(text: &str) -> Option<String> {
@@ -44,15 +62,33 @@ impl MailStore {
         Ok(threads)
     }
 
+    /// Threads matching any meaningful word of a question, best first, for
+    /// Ask your inbox. Filler words ('what', 'the', 'me') are ignored.
+    pub fn search_any(&self, question: &str) -> StoreResult<Vec<ThreadSummary>> {
+        match any_query(question) {
+            Some(query) => self.run_query(&query, false, None),
+            None => Ok(Vec::new()),
+        }
+    }
+
     fn find(
         &self,
         text: &str,
         inbox_only: bool,
         account: Option<AccountId>,
     ) -> StoreResult<Vec<ThreadSummary>> {
-        let Some(query) = fts_query(text) else {
-            return Ok(Vec::new());
-        };
+        match fts_query(text) {
+            Some(query) => self.run_query(&query, inbox_only, account),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn run_query(
+        &self,
+        query: &str,
+        inbox_only: bool,
+        account: Option<AccountId>,
+    ) -> StoreResult<Vec<ThreadSummary>> {
         let mut stmt = self.conn.prepare_cached(
             "WITH scored AS MATERIALIZED (
                 SELECT rowid AS id, bm25(messages_fts) AS score
@@ -196,6 +232,20 @@ mod tests {
         assert_eq!(subjects(&s, "vendor"), ["Vendor contract"]);
         assert!(subjects(&s, "\"").is_empty());
         assert!(subjects(&s, "NEAR( OR AND *").is_empty());
+        assert_eq!(any_query("what is it?"), None);
+        assert_eq!(
+            any_query("What does Tom need?").as_deref(),
+            Some("\"tom\"*")
+        );
+        assert_eq!(subjects(&s, "x").len(), 0);
+        let any: Vec<_> = s
+            .search_any("Anything from Priya or Kofi?")
+            .unwrap()
+            .into_iter()
+            .map(|t| t.subject)
+            .collect();
+        assert_eq!(any.len(), 2);
+        assert!(s.search_any("what?").unwrap().is_empty());
         assert_eq!(fts_query("  "), None);
         assert!(
             s.custom_view_threads("vendor", None).unwrap().is_empty(),

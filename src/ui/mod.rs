@@ -4,10 +4,13 @@
 mod accounts;
 mod add_account;
 mod add_account_view;
+mod ai_ui;
+mod ai_view;
 mod app;
 mod chrome;
 mod chrome_view;
 mod compose;
+mod compose_form;
 mod onboarding;
 mod onboarding_view;
 mod render;
@@ -16,6 +19,8 @@ mod settings_view;
 
 #[cfg(test)]
 mod add_account_tests;
+#[cfg(test)]
+mod ai_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]

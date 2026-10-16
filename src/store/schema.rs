@@ -102,6 +102,8 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE accounts ADD COLUMN last_error TEXT;",
     // 7: accounts being set up are not synced until the user finishes.
     "ALTER TABLE accounts ADD COLUMN ready INTEGER NOT NULL DEFAULT 1;",
+    // 8: AI answers, so a thread is summarised once.
+    "CREATE TABLE ai_cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);",
 ];
 
 /// Brings `conn` up to the latest schema.

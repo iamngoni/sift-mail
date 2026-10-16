@@ -37,6 +37,8 @@ pub enum Pref {
     NotifyMode,
     /// Comma-separated check-in times, such as `12:00,17:00`.
     Checkins,
+    /// `claude`, `codex` or `off`.
+    AiProvider,
 }
 
 impl Pref {
@@ -54,6 +56,7 @@ impl Pref {
             Self::AiFeatures => "ai_features",
             Self::NotifyMode => "notify_mode",
             Self::Checkins => "checkins",
+            Self::AiProvider => "ai_provider",
         }
     }
 }
@@ -510,6 +513,7 @@ mod tests {
             Pref::AiFeatures,
             Pref::NotifyMode,
             Pref::Checkins,
+            Pref::AiProvider,
             Pref::Appearance,
             Pref::Summaries,
             Pref::HoldNotifications,

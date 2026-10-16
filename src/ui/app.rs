@@ -20,8 +20,9 @@ use crate::store::{
 use crate::sync::service::SyncService;
 
 use super::add_account::AddAccountFlow;
+use super::ai_ui::{AiState, SummaryQueue};
 use super::chrome::Overlay;
-use super::compose::ComposeForm;
+use super::compose_form::ComposeForm;
 use super::onboarding::Onboarding;
 use super::settings::SettingsState;
 use crate::domain::choices::{AiFeatures, Checkins, NotifyMode, SortMode, ViewSet};
@@ -101,6 +102,20 @@ pub struct SiftApp {
     pub(crate) ai_features: AiFeatures,
     pub(crate) notify_mode: NotifyMode,
     pub(crate) checkins: Checkins,
+    /// The assistant AI features use, if one is installed and chosen.
+    pub(crate) ai: Option<std::sync::Arc<dyn crate::ai::Assistant>>,
+    pub(crate) ai_provider: crate::ai::AiProvider,
+    /// Summaries and to-dos by thread memo key.
+    pub(crate) insights: std::collections::HashMap<String, AiState<crate::ai::prompts::Insights>>,
+    /// Reply drafts by thread memo key.
+    pub(crate) drafts:
+        std::collections::HashMap<String, AiState<Vec<crate::ai::prompts::DraftReply>>>,
+    pub(crate) summary_queue: SummaryQueue,
+    pub(crate) summary_running: bool,
+    /// A tone rewrite is running.
+    pub(crate) rewriting: bool,
+    /// A closed New message, kept until sent or discarded.
+    pub(crate) compose_draft: Option<ComposeForm>,
 }
 
 impl SiftApp {
@@ -153,9 +168,18 @@ impl SiftApp {
             ai_features: AiFeatures::default(),
             notify_mode: NotifyMode::default(),
             checkins: Checkins::default(),
+            ai: None,
+            ai_provider: crate::ai::AiProvider::default(),
+            insights: std::collections::HashMap::new(),
+            drafts: std::collections::HashMap::new(),
+            summary_queue: SummaryQueue::new(),
+            summary_running: false,
+            rewriting: false,
+            compose_draft: None,
         };
         app.load_preferences(window, cx);
         app.load_choices();
+        app.load_assistant();
         app.reload();
         app.maybe_onboard();
         app.schedule_sync(cx);
@@ -323,11 +347,13 @@ impl SiftApp {
                     .iter()
                     .map(|m| self.store.attachments(m.id).unwrap_or_default())
                     .collect();
+                let opened_summary = summary.clone();
                 self.open = Some(OpenThread {
                     summary,
                     messages,
                     files,
                 });
+                self.thread_opened_ai(&opened_summary, cx);
                 self.reload();
             }
             Err(error) => self.error = Some(format!("Sift couldn't open that thread: {error}")),
