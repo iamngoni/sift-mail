@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use lettre::message::header::ContentType;
-use lettre::message::{Mailbox, MessageBuilder};
+use lettre::message::{Mailbox, MessageBuilder, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{CertificateStore, Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
@@ -81,10 +81,28 @@ pub fn build(
                     .join(" "),
             );
     }
-    let message = builder
-        .header(ContentType::TEXT_PLAIN)
-        .body(draft.body().to_owned())
-        .map_err(|e| SyncError::Protocol(e.to_string()))?;
+    let message = match draft.calendar() {
+        None => builder
+            .header(ContentType::TEXT_PLAIN)
+            .body(draft.body().to_owned()),
+        Some(calendar) => {
+            let kind = ContentType::parse(&format!(
+                "text/calendar; method={}; charset=UTF-8",
+                calendar.method
+            ))
+            .map_err(|e| SyncError::Protocol(e.to_string()))?;
+            builder.multipart(
+                MultiPart::alternative()
+                    .singlepart(SinglePart::plain(draft.body().to_owned()))
+                    .singlepart(
+                        SinglePart::builder()
+                            .header(kind)
+                            .body(calendar.ics.clone()),
+                    ),
+            )
+        }
+    }
+    .map_err(|e| SyncError::Protocol(e.to_string()))?;
     Ok(Built {
         message,
         message_id,
@@ -205,6 +223,42 @@ mod tests {
         assert!(text.contains("From: you@fastmail.com"));
         assert!(text.contains("a@x.com") && text.contains("b@y.com"));
         assert!(!text.contains("In-Reply-To"));
+    }
+
+    #[test]
+    fn invitations_carry_a_calendar_part() {
+        let me = me();
+        let draft = Draft::new(
+            Recipients::parse("daniel@company.com").unwrap(),
+            "Accepted: Roadmap sync",
+            "Accepted.",
+        )
+        .unwrap()
+        .with_calendar(
+            "REPLY",
+            "BEGIN:VCALENDAR
+END:VCALENDAR
+"
+            .into(),
+        );
+        let built = build(
+            &From {
+                name: "You",
+                email: &me,
+            },
+            &draft,
+            now(),
+            1,
+        )
+        .unwrap();
+        let text = String::from_utf8(built.message.formatted()).unwrap();
+        assert!(text.contains("multipart/alternative"));
+        assert!(
+            text.to_ascii_lowercase()
+                .contains("text/calendar; method=reply; charset=utf-8")
+        );
+        assert!(text.contains("BEGIN:VCALENDAR"));
+        assert!(text.contains("Accepted."));
     }
 
     #[test]

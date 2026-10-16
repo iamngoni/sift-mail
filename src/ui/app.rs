@@ -116,6 +116,8 @@ pub struct SiftApp {
     pub(crate) rewriting: bool,
     /// A closed New message, kept until sent or discarded.
     pub(crate) compose_draft: Option<ComposeForm>,
+    /// The Calendar screen, while open.
+    pub(crate) calendar: Option<super::calendar::CalendarState>,
 }
 
 impl SiftApp {
@@ -176,6 +178,7 @@ impl SiftApp {
             summary_running: false,
             rewriting: false,
             compose_draft: None,
+            calendar: None,
         };
         app.load_preferences(window, cx);
         app.load_choices();
@@ -224,7 +227,7 @@ impl SiftApp {
     /// Re-reads the list and counts from the store, waking due snoozes first.
     pub(crate) fn reload(&mut self) {
         match self.load() {
-            Ok(()) => self.error = None,
+            Ok(()) => {}
             Err(error) => self.error = Some(format!("Sift couldn't read your mail: {error}")),
         }
         self.cursor = self.cursor.min(self.threads.len().saturating_sub(1));
@@ -518,6 +521,103 @@ impl SiftApp {
         cx.notify();
     }
 
+    /// Escape, seen before any text box can swallow it: backs out of the
+    /// topmost thing on screen.
+    pub(crate) fn on_escape(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.key != "escape" || event.keystroke.modifiers.modified() {
+            return;
+        }
+        if self.back_out(window, cx) {
+            self.refocus(window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    /// After backing out, keys go to the window, or to the text box of the
+    /// Add account step still showing.
+    fn refocus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use super::add_account::Step;
+        match self
+            .form
+            .as_ref()
+            .map(|f| (f.step, f.email.clone(), f.password.clone()))
+        {
+            Some((Step::Choose, email, _)) => email.read(cx).focus_handle(cx).focus(window, cx),
+            Some((Step::Imap, _, password)) => password.read(cx).focus_handle(cx).focus(window, cx),
+            _ => self.focus.focus(window, cx),
+        }
+    }
+
+    /// A text box's own Escape action, caught on the way down so it backs
+    /// out of dialogs instead of being swallowed by the box.
+    pub(crate) fn on_escape_action(
+        &mut self,
+        _: &gpui_kit::component::input::Escape,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.back_out(window, cx) {
+            self.refocus(window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    /// Backs out of the topmost dialog, sheet or screen. Returns whether
+    /// there was anything to back out of.
+    fn back_out(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.is_waiting_for_browser() {
+            self.cancel_oauth(cx);
+            true
+        } else if self.form.is_some() {
+            if self.can_close_add_account() {
+                self.close_add_account(cx);
+            }
+            true
+        } else if self.compose.is_some() {
+            self.close_compose(cx);
+            true
+        } else if self.overlay.is_some() {
+            self.close_overlay(window, cx);
+            true
+        } else if self
+            .settings
+            .as_ref()
+            .is_some_and(|s| s.confirm_remove.is_some())
+        {
+            self.cancel_remove_account(cx);
+            true
+        } else if self.settings.is_some() {
+            self.close_settings(window, cx);
+            true
+        } else if let Some(c) = &self.calendar {
+            let typing = c.ask.read(cx).focus_handle(cx).is_focused(window);
+            if c.draft.is_some() {
+                self.cancel_event(window, cx);
+            } else if c.detail.is_some() {
+                self.show_event(None, cx);
+            } else if typing {
+                self.focus.focus(window, cx);
+            } else {
+                self.close_calendar(window, cx);
+            }
+            true
+        } else if self
+            .reply_box
+            .as_ref()
+            .is_some_and(|b| b.read(cx).focus_handle(cx).is_focused(window))
+        {
+            self.focus.focus(window, cx);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn on_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -540,6 +640,7 @@ impl SiftApp {
             && key == "k"
             && self.form.is_none()
             && self.compose.is_none()
+            && self.calendar.is_none()
         {
             self.toggle_palette(window, cx);
             cx.stop_propagation();
@@ -562,6 +663,17 @@ impl SiftApp {
                 } else {
                     self.close_settings(window, cx);
                 }
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if self.calendar.is_some()
+            && self.form.is_none()
+            && self.overlay.is_none()
+            && self.compose.is_none()
+            && self.settings.is_none()
+        {
+            if self.calendar_key(event, window, cx) {
                 cx.stop_propagation();
             }
             return;

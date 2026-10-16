@@ -221,7 +221,21 @@ fn order_default_from_and_removal(cx: &mut TestAppContext) {
     click(cx, handle, "remove-account");
     click(cx, handle, "cancel-remove");
     click(cx, handle, "remove-account");
-    click(cx, handle, "remove-scrim");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click_at(
+            "remove-scrim",
+            gpui_kit::point(gpui_kit::px(4.0), gpui_kit::px(4.0)),
+            cx,
+        );
+    })
+    .unwrap();
+    assert!(read(cx, &view, |a| a
+        .settings
+        .as_ref()
+        .unwrap()
+        .confirm_remove
+        .is_none()));
     click(cx, handle, "remove-account");
     press(cx, handle, &["escape"]);
     assert!(

@@ -1201,6 +1201,7 @@ impl SiftApp {
         };
         div()
             .id("remove-scrim")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(scrim())

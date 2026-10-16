@@ -57,6 +57,25 @@ pub fn attachments(raw: &[u8]) -> Vec<AttachmentData> {
         .collect()
 }
 
+/// The iCalendar text of a meeting invitation in `raw`, if it has one: a
+/// `text/calendar` part or an `.ics` attachment.
+pub fn calendar(raw: &[u8]) -> Option<String> {
+    let message = MessageParser::default().parse(raw)?;
+    message.parts.iter().find_map(|part| {
+        let is_calendar = part.content_type().is_some_and(|ct| {
+            ct.ctype().eq_ignore_ascii_case("text")
+                && ct
+                    .subtype()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("calendar"))
+        }) || part
+            .attachment_name()
+            .is_some_and(|n| n.to_ascii_lowercase().ends_with(".ics"));
+        is_calendar
+            .then(|| String::from_utf8_lossy(part.contents()).into_owned())
+            .filter(|text| text.contains("BEGIN:VEVENT"))
+    })
+}
+
 /// Everything known about a message besides its bytes.
 #[derive(Debug, Clone)]
 pub struct Envelope<'a> {
@@ -328,6 +347,20 @@ MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"b\"\r\n\r\n
         let m = parse(invite.as_bytes(), &envelope(&me)).unwrap();
         assert!(m.signals.calendar_invite);
         assert_eq!(m.body_text.trim(), "Roadmap sync");
+        assert_eq!(calendar(invite.as_bytes()), None, "no VEVENT inside");
+        let real = invite.replace(
+            "BEGIN:VCALENDAR\r\nEND",
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT\r\nEND",
+        );
+        assert!(calendar(real.as_bytes()).unwrap().contains("UID:x"));
+        let ics = "From: a@b.com\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"m\"\r\n\r\n\
+--m\r\nContent-Type: text/plain\r\n\r\nSee invite\r\n\
+--m\r\nContent-Type: application/octet-stream; name=\"invite.ics\"\r\n\
+Content-Disposition: attachment; filename=\"invite.ics\"\r\n\r\n\
+BEGIN:VEVENT\r\nUID:y\r\nEND:VEVENT\r\n--m--\r\n";
+        assert!(calendar(ics.as_bytes()).unwrap().contains("UID:y"));
+        assert_eq!(calendar(b""), None);
 
         let robot = "From: Bot <bot@service.com>\r\nTo: you@company.com\r\nAuto-Submitted: auto-generated\r\n\
 Subject: Build passed\r\n\r\nok\r\n";

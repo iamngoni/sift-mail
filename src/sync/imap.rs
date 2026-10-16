@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 
 use chrono::{DateTime, Duration, Utc};
 
-use super::parse::{Envelope, attachments, parse};
+use super::parse::{Envelope, attachments, calendar, parse};
 use crate::domain::{AuthMethod, EmailAddress, ImapSettings, SyncCursor};
 use crate::store::{Account, MailStore, StoreError};
 
@@ -161,6 +161,17 @@ pub fn sync_inbox(
             match parse(&raw.body, &envelope) {
                 Ok(message) => {
                     let id = store.upsert(&message)?;
+                    if (message.signals.calendar_invite || message.has_attachments)
+                        && let Some(invite) = calendar(&raw.body)
+                            .as_deref()
+                            .and_then(crate::domain::ical::parse)
+                    {
+                        let thread = crate::domain::ThreadRef {
+                            account: account.id,
+                            key: message.thread_key.clone(),
+                        };
+                        store.apply_invite(account.id, &invite, Some(&thread))?;
+                    }
                     if message.has_attachments {
                         store.save_attachments(id, &attachments(&raw.body))?;
                     }

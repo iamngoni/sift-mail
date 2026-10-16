@@ -339,7 +339,10 @@ impl SiftApp {
         flow.error = None;
         let typed = flow.typed_email(cx);
         match provider {
-            Provider::Microsoft365 | Provider::Google => flow.step = Step::OAuth,
+            Provider::Microsoft365 | Provider::Google => {
+                flow.step = Step::OAuth;
+                self.focus.focus(window, cx);
+            }
             Provider::ICloud | Provider::Imap => {
                 flow.step = Step::Imap;
                 let email = EmailAddress::parse(&typed).ok();
@@ -436,6 +439,7 @@ impl SiftApp {
         flow.step = Step::Waiting;
         flow.error = None;
         let link = Arc::clone(&flow.link);
+        self.focus.focus(window, cx);
         cx.notify();
         let task = cx
             .background_executor()
@@ -641,6 +645,8 @@ impl SiftApp {
         flow.account = Some(account);
         flow.step = Step::Setup;
         flow.error = None;
+        let name_box = flow.name.clone();
+        name_box.read(cx).focus_handle(cx).focus(window, cx);
         self.reload();
         cx.notify();
     }
@@ -701,6 +707,7 @@ impl SiftApp {
             flow.synced = 0;
             flow.sync_result = None;
         }
+        self.focus.focus(window, cx);
         self.reload();
         cx.notify();
         let Some(service) = self.sync.clone() else {

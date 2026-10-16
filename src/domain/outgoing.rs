@@ -93,6 +93,16 @@ pub struct Draft {
     subject: String,
     body: String,
     reply: Option<ReplyContext>,
+    calendar: Option<CalendarPart>,
+}
+
+/// A `text/calendar` part sent alongside the text (iMIP).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarPart {
+    /// `REQUEST`, `REPLY` or `CANCEL`.
+    pub method: &'static str,
+    /// The iCalendar text.
+    pub ics: String,
 }
 
 impl Draft {
@@ -106,6 +116,7 @@ impl Draft {
             subject: subject.trim().to_owned(),
             body: body.to_owned(),
             reply: None,
+            calendar: None,
         })
     }
 
@@ -134,6 +145,17 @@ impl Draft {
     /// Reply threading, if this is a reply.
     pub fn reply(&self) -> Option<&ReplyContext> {
         self.reply.as_ref()
+    }
+
+    /// Attaches an invitation or an answer to one.
+    pub fn with_calendar(mut self, method: &'static str, ics: String) -> Self {
+        self.calendar = Some(CalendarPart { method, ics });
+        self
+    }
+
+    /// The calendar part, if any.
+    pub fn calendar(&self) -> Option<&CalendarPart> {
+        self.calendar.as_ref()
     }
 }
 

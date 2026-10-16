@@ -342,6 +342,7 @@ impl SiftApp {
         let ai_empty = form.ai_prompt.read(cx).value().trim().is_empty();
         div()
             .id("compose-scrim")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(scrim())
@@ -390,8 +391,9 @@ impl SiftApp {
                                     .text_color(p.ink_2)
                                     .hover(move |s| s.bg(hover))
                                     .child(Icon::new(IconName::Close).size(px(16.0)))
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                        this.close_compose(cx)
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.close_compose(cx);
+                                        this.focus.focus(window, cx);
                                     }))
                                     .test_support(),
                             ),
@@ -569,8 +571,9 @@ impl SiftApp {
                                     .text_color(p.ink_3)
                                     .hover(move |s| s.bg(hover))
                                     .child(Icon::new(Lucide::Trash).size(px(16.0)))
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                        this.discard_compose(cx)
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.discard_compose(cx);
+                                        this.focus.focus(window, cx);
                                     }))
                                     .test_support(),
                             ),

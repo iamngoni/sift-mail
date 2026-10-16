@@ -40,6 +40,8 @@ impl Render for SiftApp {
         div()
             .id("sift-root")
             .track_focus(&self.focus)
+            .capture_key_down(cx.listener(Self::on_escape))
+            .capture_action(cx.listener(Self::on_escape_action))
             .on_key_down(cx.listener(Self::on_key_down))
             .size_full()
             .flex()
@@ -56,8 +58,27 @@ impl Render for SiftApp {
                         .bg(p.bg_subtle)
                         .border_b_1()
                         .border_color(p.line)
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
                         .text_color(p.warn)
-                        .child(message),
+                        .child(div().flex_1().min_w_0().child(message))
+                        .child(
+                            div()
+                                .id("dismiss-error")
+                                .size(px(24.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(6.0))
+                                .text_color(p.ink_3)
+                                .child(Icon::new(IconName::Close).size(px(14.0)))
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.error = None;
+                                    cx.notify();
+                                }))
+                                .test_support(),
+                        ),
                 )
             })
             .when(self.onboarding.is_some(), |root| {
@@ -90,7 +111,21 @@ impl Render for SiftApp {
                 },
             )
             .when(
-                self.settings.is_none() && self.onboarding.is_none(),
+                self.calendar.is_some() && self.settings.is_none() && self.onboarding.is_none(),
+                |root| {
+                    root.child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .child(self.calendar_screen(&p, cx))
+                            .child(self.dock(&p, sift.appearance(), false, cx)),
+                    )
+                },
+            )
+            .when(
+                self.settings.is_none() && self.onboarding.is_none() && self.calendar.is_none(),
                 |root| {
                     root.child(
                         div()
@@ -107,7 +142,7 @@ impl Render for SiftApp {
                                     .flex()
                                     .flex_col()
                                     .child(body)
-                                    .child(self.dock(&p, sift.appearance(), cx)),
+                                    .child(self.dock(&p, sift.appearance(), true, cx)),
                             )
                             .children(self.overlay_layer(&p, cx))
                             .when(self.snoozing.is_some(), |area| {
@@ -129,8 +164,11 @@ impl SiftApp {
     fn title_bar(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let in_settings = self.settings.is_some();
         let onboarding = self.onboarding.is_some();
+        let in_calendar = self.calendar.is_some() && !in_settings;
         let mut tabs: Vec<AnyElement> = if onboarding {
             Vec::new()
+        } else if in_calendar {
+            self.section_tabs(p, cx)
         } else if in_settings {
             vec![self.back_to_mail_tab(p, cx)]
         } else {
@@ -140,7 +178,7 @@ impl SiftApp {
                 .map(|view| self.tab(view, p, cx))
                 .collect()
         };
-        if !in_settings && !onboarding {
+        if !in_settings && !onboarding && !in_calendar {
             tabs.extend(self.custom_tabs(p, cx));
         }
         TitleBar::new()
@@ -172,7 +210,8 @@ impl SiftApp {
                 bar.children(self.onboarding_sync_chip(p))
                     .child(div().w(px(12.0)))
             })
-            .when(!in_settings && !onboarding, |bar| {
+            .when(in_calendar, |bar| bar.child(self.new_event_pill(p, cx)))
+            .when(!in_settings && !onboarding && !in_calendar, |bar| {
                 bar.child(self.title_actions(p, cx))
             })
     }
@@ -357,6 +396,7 @@ impl SiftApp {
             .when(thread.has_attachments, |row| {
                 row.child(Icon::new(IconName::File).size(px(14.0)).text_color(p.ink_3))
             })
+            .children(self.row_rsvp(thread, index, p, cx))
             .child(
                 div()
                     .flex()
@@ -653,6 +693,7 @@ impl SiftApp {
                                     .when_some(account, |d, name| d.child("·").child(name)),
                             ),
                     )
+                    .children(self.meeting_card(p, cx))
                     .children(self.ai_card(open, p, cx))
                     .child(
                         div()
@@ -668,10 +709,11 @@ impl SiftApp {
             .into_any_element()
     }
 
-    fn dock(
+    pub(super) fn dock(
         &self,
         p: &Palette,
         appearance: Appearance,
+        toolbar: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let hover = p.bg_hover;
@@ -736,70 +778,72 @@ impl SiftApp {
                         ),
                 )
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .p(px(4.0))
-                    .rounded(px(radius::CARD))
-                    .bg(p.bg)
-                    .border_1()
-                    .border_color(p.line_strong)
-                    .child(self.toolbar_button(
-                        "dock-palette",
-                        IconName::Search.into(),
-                        false,
-                        p,
-                        cx.listener(|this, _: &ClickEvent, window, cx| {
-                            this.toggle_palette(window, cx)
-                        }),
-                    ))
-                    .child(self.toolbar_button(
-                        "toggle-sidebar",
-                        IconName::PanelLeft.into(),
-                        self.sidebar,
-                        p,
-                        cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_sidebar(cx)),
-                    ))
-                    .child(self.toolbar_button(
-                        "toggle-summaries",
-                        Lucide::Sparkles.into(),
-                        self.summaries,
-                        p,
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.set_summaries(!this.summaries, cx)
-                        }),
-                    ))
-                    .child(div().w(px(1.0)).h(px(20.0)).mx(px(4.0)).bg(p.line_strong))
-                    .child(
-                        div()
-                            .id("toggle-theme")
-                            .h(px(size::ICON_BUTTON))
-                            .px(px(10.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .rounded(px(radius::BUTTON))
-                            .text_size(px(text::META))
-                            .text_color(p.ink_2)
-                            .hover(move |style| style.bg(hover))
-                            .child(Icon::new(appearance_icon(appearance)).size(px(16.0)))
-                            .child(theme_label)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.cycle_theme(window, cx);
-                            }))
-                            .test_support(),
-                    )
-                    .child(self.toolbar_button(
-                        "open-shortcuts",
-                        Lucide::Keyboard.into(),
-                        false,
-                        p,
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.toggle_overlay("shortcuts", cx)
-                        }),
-                    )),
-            )
+            .when(toolbar, |dock| {
+                dock.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .p(px(4.0))
+                        .rounded(px(radius::CARD))
+                        .bg(p.bg)
+                        .border_1()
+                        .border_color(p.line_strong)
+                        .child(self.toolbar_button(
+                            "dock-palette",
+                            IconName::Search.into(),
+                            false,
+                            p,
+                            cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.toggle_palette(window, cx)
+                            }),
+                        ))
+                        .child(self.toolbar_button(
+                            "toggle-sidebar",
+                            IconName::PanelLeft.into(),
+                            self.sidebar,
+                            p,
+                            cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_sidebar(cx)),
+                        ))
+                        .child(self.toolbar_button(
+                            "toggle-summaries",
+                            Lucide::Sparkles.into(),
+                            self.summaries,
+                            p,
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.set_summaries(!this.summaries, cx)
+                            }),
+                        ))
+                        .child(div().w(px(1.0)).h(px(20.0)).mx(px(4.0)).bg(p.line_strong))
+                        .child(
+                            div()
+                                .id("toggle-theme")
+                                .h(px(size::ICON_BUTTON))
+                                .px(px(10.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .rounded(px(radius::BUTTON))
+                                .text_size(px(text::META))
+                                .text_color(p.ink_2)
+                                .hover(move |style| style.bg(hover))
+                                .child(Icon::new(appearance_icon(appearance)).size(px(16.0)))
+                                .child(theme_label)
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.cycle_theme(window, cx);
+                                }))
+                                .test_support(),
+                        )
+                        .child(self.toolbar_button(
+                            "open-shortcuts",
+                            Lucide::Keyboard.into(),
+                            false,
+                            p,
+                            cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.toggle_overlay("shortcuts", cx)
+                            }),
+                        )),
+                )
+            })
     }
 
     fn toolbar_button(
@@ -863,6 +907,7 @@ impl SiftApp {
             .collect();
         div()
             .id("snooze-scrim")
+            .occlude()
             .absolute()
             .inset_0()
             .bg(scrim())

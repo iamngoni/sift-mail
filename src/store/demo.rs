@@ -5,8 +5,10 @@
 
 use chrono::{DateTime, Duration, Utc};
 
+use super::{EventKind, NewEvent};
 use super::{MailStore, StoreResult, parse_email};
-use crate::domain::{Contact, IncomingMessage, Provider, Signals};
+use crate::domain::ical::{Invite, Method, Person};
+use crate::domain::{AccountId, Contact, IncomingMessage, Provider, Signals, ThreadRef};
 
 struct Sample {
     remote: &'static str,
@@ -194,7 +196,111 @@ pub fn seed(store: &MailStore, now: DateTime<Utc>) -> StoreResult<bool> {
             )?;
         }
     }
+    seed_calendar(store, account.id, now)?;
     Ok(true)
+}
+
+/// A week of meetings, focus time and one unanswered invitation, around `now`.
+fn seed_calendar(store: &MailStore, account: AccountId, now: DateTime<Utc>) -> StoreResult<()> {
+    use chrono::{Datelike as _, Local, NaiveTime, TimeZone as _};
+    let today = now.with_timezone(&Local).date_naive();
+    let monday = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+    let at = |day: i64, h: u32, m: u32| {
+        let naive = (monday + Duration::days(day))
+            .and_time(NaiveTime::from_hms_opt(h, m, 0).unwrap_or(NaiveTime::MIN));
+        Local
+            .from_local_datetime(&naive)
+            .earliest()
+            .map_or(now, |t| t.with_timezone(&Utc))
+    };
+    let person = |name: &str, email: &str| -> StoreResult<Person> {
+        Ok(Person {
+            name: Some(name.to_owned()),
+            email: parse_email(email)?,
+        })
+    };
+    let me = person("You", "you@company.com")?;
+    let mut n = 0;
+    let mut add = |title: &str, start, end, kind, with: Vec<Person>| -> StoreResult<()> {
+        n += 1;
+        store.add_event(
+            &NewEvent {
+                account,
+                title: title.to_owned(),
+                start,
+                end,
+                kind,
+                attendees: with,
+                uid: format!("demo-{n}"),
+            },
+            Some(&me),
+        )?;
+        Ok(())
+    };
+    for day in 0..5 {
+        add(
+            "Standup",
+            at(day, 9, 30),
+            at(day, 9, 45),
+            EventKind::Meeting,
+            vec![],
+        )?;
+    }
+    add(
+        "Focus: Q4 planning",
+        at(0, 13, 0),
+        at(0, 15, 0),
+        EventKind::Focus,
+        vec![],
+    )?;
+    add(
+        "1:1 with Aisha",
+        at(2, 10, 0),
+        at(2, 10, 30),
+        EventKind::Meeting,
+        vec![person("Aisha Bello", "aisha@company.com")?],
+    )?;
+    add(
+        "Design review",
+        at(3, 11, 0),
+        at(3, 12, 0),
+        EventKind::Meeting,
+        vec![person("Lena Fischer", "lena@company.com")?],
+    )?;
+    add(
+        "Focus: deep work",
+        at(3, 15, 0),
+        at(3, 17, 0),
+        EventKind::Focus,
+        vec![],
+    )?;
+    add(
+        "Lunch with Sam",
+        at(4, 12, 30),
+        at(4, 13, 30),
+        EventKind::Personal,
+        vec![],
+    )?;
+    let start = at(8, 14, 0);
+    store.apply_invite(
+        account,
+        &Invite {
+            method: Method::Request,
+            uid: "demo-roadmap".to_owned(),
+            sequence: 0,
+            summary: "Roadmap sync".to_owned(),
+            start,
+            end: start + Duration::minutes(30),
+            all_day: false,
+            location: Some("Microsoft Teams".to_owned()),
+            organizer: Some(person("Daniel Mensah", "daniel@company.com")?),
+            attendees: vec![me.clone(), person("Priya Raman", "priya@company.com")?],
+        },
+        Some(&ThreadRef {
+            account,
+            key: "roadmap".to_owned(),
+        }),
+    )
 }
 
 #[cfg(test)]

@@ -396,3 +396,14 @@ fn file_chips_open_saved_attachments(cx: &mut TestAppContext) {
             .contains("no app for .xlsx")
     );
 }
+
+#[gpui_kit::test]
+fn a_start_screen_can_be_named(cx: &mut TestAppContext) {
+    let (_, view) = open(cx, true);
+    cx.update(|cx| super::open_start_screen(&view, "nothing", cx));
+    assert!(!read(cx, &view, SiftApp::calendar_open));
+    cx.update(|cx| super::open_start_screen(&view, "calendar", cx));
+    assert!(read(cx, &view, SiftApp::calendar_open));
+    cx.update(|cx| super::open_start_screen(&view, "settings", cx));
+    assert!(read(cx, &view, SiftApp::settings_open));
+}
