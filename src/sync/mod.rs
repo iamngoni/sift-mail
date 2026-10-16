@@ -16,7 +16,8 @@ use chrono::{DateTime, Utc};
 
 use self::imap::{MailSession, SyncError, SyncReport, password_key, sync_inbox};
 use self::secrets::Secrets;
-use crate::domain::{AccountId, EmailAddress, ImapSettings, Provider, SyncCursor};
+use crate::domain::{AccountId, AuthMethod, EmailAddress, ImapSettings, Provider, SyncCursor};
+use crate::oauth::{SignedIn, Tokens};
 use crate::store::{Account, MailStore};
 
 /// What the user typed into the Add account dialog, already parsed.
@@ -79,11 +80,75 @@ fn sync_one<S: MailSession>(
     cursor: SyncCursor,
     now: DateTime<Utc>,
 ) -> Result<SyncReport, SyncError> {
-    let password = secrets
-        .get(&password_key(&account.email))?
-        .ok_or(SyncError::NoPassword)?;
-    let mut session = connect(settings, &password)?;
+    let secret = secret_for(secrets, account, settings, now)?;
+    let mut session = connect(settings, &secret)?;
     sync_inbox(&mut session, store, account, cursor, now)
+}
+
+/// The key under which an OAuth account's tokens are saved.
+pub fn token_key(email: &EmailAddress) -> String {
+    format!("oauth:{email}")
+}
+
+/// What to present to the mail servers for `account`: its password, or an
+/// access token refreshed first if it is about to expire. Refreshed tokens
+/// are saved before use so a crash can't lose a rotated refresh token.
+pub fn secret_for(
+    secrets: &dyn Secrets,
+    account: &Account,
+    settings: &ImapSettings,
+    now: DateTime<Utc>,
+) -> Result<String, SyncError> {
+    match settings.auth {
+        AuthMethod::Password => secrets
+            .get(&password_key(&account.email))?
+            .ok_or(SyncError::NoPassword),
+        AuthMethod::OAuth => {
+            let key = token_key(&account.email);
+            let saved = secrets.get(&key)?.ok_or(SyncError::NoPassword)?;
+            let tokens: Tokens = serde_json::from_str(&saved).map_err(|_| {
+                SyncError::Protocol("saved sign-in is unreadable; sign in again".into())
+            })?;
+            if !tokens.needs_refresh(now) {
+                return Ok(tokens.access_token);
+            }
+            let fresh = secrets.refresh_tokens(account.provider, &tokens)?;
+            secrets.set(&key, &save_tokens(&fresh)?)?;
+            Ok(fresh.access_token)
+        }
+    }
+}
+
+fn save_tokens(tokens: &Tokens) -> Result<String, SyncError> {
+    serde_json::to_string(tokens).map_err(|e| SyncError::Protocol(e.to_string()))
+}
+
+/// Saves an account that signed in through the browser: checks the token
+/// against the IMAP server, then stores the account and its tokens.
+pub fn add_oauth_account<S: MailSession>(
+    store: &MailStore,
+    secrets: &dyn Secrets,
+    provider: Provider,
+    signed_in: &SignedIn,
+    connect: impl FnOnce(&ImapSettings, &str) -> Result<S, SyncError>,
+) -> Result<Account, SyncError> {
+    let settings = ImapSettings {
+        auth: AuthMethod::OAuth,
+        ..ImapSettings::for_address(&signed_in.email, provider)
+    };
+    let mut session = connect(&settings, &signed_in.tokens.access_token)?;
+    session.examine_inbox()?;
+    let name = match provider {
+        Provider::Google => "Gmail",
+        _ => "Work",
+    };
+    let account = store.add_account(name, &signed_in.email, provider)?;
+    store.save_imap(account.id, &settings)?;
+    secrets.set(
+        &token_key(&signed_in.email),
+        &save_tokens(&signed_in.tokens)?,
+    )?;
+    Ok(account)
 }
 
 /// Forgets an account: its local mail, settings and saved password.
@@ -94,5 +159,9 @@ pub fn remove_account(
 ) -> Result<(), SyncError> {
     store.remove_account(account.id)?;
     secrets.delete(&password_key(&account.email))?;
+    secrets.delete(&token_key(&account.email))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

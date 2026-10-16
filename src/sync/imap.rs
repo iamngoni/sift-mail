@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use chrono::{DateTime, Duration, Utc};
 
 use super::parse::{Envelope, parse};
-use crate::domain::{EmailAddress, ImapSettings, SyncCursor};
+use crate::domain::{AuthMethod, EmailAddress, ImapSettings, SyncCursor};
 use crate::store::{Account, MailStore, StoreError};
 
 /// How far back the first sync of an account reaches.
@@ -43,6 +43,9 @@ pub enum SyncError {
     /// The credential store failed.
     #[error(transparent)]
     Secrets(#[from] super::secrets::SecretError),
+    /// Browser sign-in or token refresh failed.
+    #[error(transparent)]
+    OAuth(#[from] crate::oauth::OAuthError),
     /// Writing to the local store failed.
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -244,25 +247,41 @@ fn protocol(error: imap::Error) -> SyncError {
     SyncError::Protocol(error.to_string())
 }
 
-/// Logs in on an already-open stream. Used by [`connect`] and by tests.
+/// SASL XOAUTH2: the whole response is sent in reply to the first challenge.
+struct XOAuth2(String);
+
+impl imap::Authenticator for XOAuth2 {
+    type Response = String;
+
+    fn process(&self, _: &[u8]) -> Self::Response {
+        self.0.clone()
+    }
+}
+
+/// Logs in on an already-open stream with a password or an OAuth access
+/// token, depending on `auth`. Used by [`connect`] and by tests.
 pub fn login<T: Read + Write>(
     client: imap::Client<T>,
     username: &str,
-    password: &str,
+    secret: &str,
+    auth: AuthMethod,
 ) -> Result<ImapSession<T>, SyncError> {
-    client
-        .login(username, password)
-        .map(ImapSession)
-        .map_err(|(error, _)| match error {
-            imap::Error::No(_) | imap::Error::Bad(_) => SyncError::Auth,
-            other => protocol(other),
-        })
+    let session = match auth {
+        AuthMethod::Password => client.login(username, secret),
+        AuthMethod::OAuth => {
+            client.authenticate("XOAUTH2", &XOAuth2(crate::oauth::xoauth2(username, secret)))
+        }
+    };
+    session.map(ImapSession).map_err(|(error, _)| match error {
+        imap::Error::No(_) | imap::Error::Bad(_) => SyncError::Auth,
+        other => protocol(other),
+    })
 }
 
 /// Opens a TLS connection (implicit on 993, STARTTLS otherwise) and logs in.
 pub fn connect(
     settings: &ImapSettings,
-    password: &str,
+    secret: &str,
 ) -> Result<ImapSession<imap::Connection>, SyncError> {
     let mode = if settings.implicit_tls() {
         imap::ConnectionMode::Tls
@@ -277,7 +296,7 @@ pub fn connect(
             host: settings.host.to_string(),
             detail: e.to_string(),
         })?;
-    login(client, &settings.username, password)
+    login(client, &settings.username, secret, settings.auth)
 }
 
 /// The secret key under which an account's password is saved.

@@ -368,6 +368,22 @@ fn scripted_server(message: Vec<u8>, accept_password: &'static str) -> std::net:
                     format!("{tag} OK LOGIN completed\r\n")
                 }
                 "LOGIN" => format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n"),
+                "AUTHENTICATE" => {
+                    out.write_all(b"+ \r\n").unwrap();
+                    let mut response = String::new();
+                    reader.read_line(&mut response).unwrap();
+                    let decoded = base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD,
+                        response.trim_end(),
+                    )
+                    .unwrap_or_default();
+                    let text = String::from_utf8_lossy(&decoded);
+                    if text.contains(&format!("auth=Bearer {accept_password}\x01")) {
+                        format!("{tag} OK AUTHENTICATE completed\r\n")
+                    } else {
+                        format!("{tag} NO [AUTHENTICATIONFAILED] Invalid token\r\n")
+                    }
+                }
                 "EXAMINE" => format!(
                     "* 1 EXISTS\r\n* OK [UIDVALIDITY 9] UIDs valid\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n"
                 ),
@@ -410,7 +426,13 @@ fn real_adapter_syncs_from_a_server() {
         raw(42, "Tom <tom@company.com>", "Vendor contract"),
         "secret",
     );
-    let mut session = login(client(addr), "you@company.com", "secret").unwrap();
+    let mut session = login(
+        client(addr),
+        "you@company.com",
+        "secret",
+        AuthMethod::Password,
+    )
+    .unwrap();
     let (store, account) = setup();
     let report = sync_inbox(&mut session, &store, &account, SyncCursor::default(), now()).unwrap();
     assert_eq!(report.stored, 1);
@@ -430,7 +452,12 @@ fn real_adapter_syncs_from_a_server() {
 fn real_adapter_maps_a_rejected_login_to_auth() {
     let addr = scripted_server(Vec::new(), "secret");
     assert!(matches!(
-        login(client(addr), "you@company.com", "nope"),
+        login(
+            client(addr),
+            "you@company.com",
+            "nope",
+            AuthMethod::Password
+        ),
         Err(SyncError::Auth)
     ));
 }
@@ -442,10 +469,34 @@ fn connecting_to_nowhere_is_a_connect_error() {
         host: crate::domain::Host::parse("localhost.invalid").unwrap(),
         port: 9,
         username: "x".into(),
+        auth: AuthMethod::Password,
     };
     match connect(&settings, "pw") {
         Err(SyncError::Connect { host, .. }) => assert_eq!(host, "localhost.invalid"),
         Err(other) => panic!("expected a connect error, got {other}"),
         Ok(_) => panic!("connected to nowhere"),
     }
+}
+
+#[test]
+fn real_adapter_signs_in_with_an_oauth_token() {
+    let addr = scripted_server(raw(42, "Tom <tom@company.com>", "Hi"), "token-123");
+    let mut session = login(
+        client(addr),
+        "you@company.com",
+        "token-123",
+        AuthMethod::OAuth,
+    )
+    .unwrap();
+    assert!(session.examine_inbox().is_ok());
+    let addr = scripted_server(Vec::new(), "token-123");
+    assert!(matches!(
+        login(
+            client(addr),
+            "you@company.com",
+            "expired",
+            AuthMethod::OAuth
+        ),
+        Err(SyncError::Auth)
+    ));
 }

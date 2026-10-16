@@ -10,12 +10,16 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use super::imap::{MailSession, MailboxInfo, RawMessage, SyncError, connect};
+use super::secrets::Refreshing;
 use super::secrets::Secrets;
 use super::send::{SendOutcome, SendRequest, send_message, write_read};
 use super::smtp::{Sender, smtp_sender};
-use super::{AddAccountRequest, add_imap_account, sync_all};
+use super::{AddAccountRequest, add_imap_account, add_oauth_account, sync_all};
+use crate::domain::{EmailAddress, Provider};
 use crate::domain::{ImapSettings, ThreadRef};
+use crate::oauth::{self, OAuthConfig, OAuthError, ReqwestHttp, SignedIn};
 use crate::store::{Account, MailStore};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A boxed session, so tests can swap the network for a fake.
 pub type BoxedSession = Box<dyn MailSession + Send>;
@@ -64,6 +68,30 @@ pub struct SyncService {
     secrets: Arc<dyn Secrets>,
     connector: Connector,
     sender: Sender,
+    signer: Signer,
+}
+
+/// Runs a browser sign-in: provider, optional address hint, and a
+/// cancellation check polled while waiting for the browser.
+pub type Signer = Arc<
+    dyn Fn(Provider, Option<&EmailAddress>, &dyn Fn() -> bool) -> Result<SignedIn, OAuthError>
+        + Send
+        + Sync,
+>;
+
+/// The production signer: the system browser and real token endpoints.
+pub fn browser_signer() -> Signer {
+    Arc::new(|provider, hint, cancelled| {
+        let config = OAuthConfig::for_provider(provider)?;
+        oauth::sign_in(
+            &config,
+            &ReqwestHttp::new()?,
+            hint,
+            &oauth::system_browser,
+            oauth::SIGN_IN_TIMEOUT,
+            cancelled,
+        )
+    })
 }
 
 impl SyncService {
@@ -79,7 +107,14 @@ impl SyncService {
             secrets,
             connector,
             sender,
+            signer: browser_signer(),
         }
+    }
+
+    /// Replaces the browser sign-in, for tests and previews.
+    pub fn with_signer(mut self, signer: Signer) -> Self {
+        self.signer = signer;
+        self
     }
 
     /// The production service: real TLS connections.
@@ -87,7 +122,28 @@ impl SyncService {
         let connector: Connector = Arc::new(|settings: &ImapSettings, password: &str| {
             connect(settings, password).map(|s| Box::new(s) as BoxedSession)
         });
+        let secrets: Arc<dyn Secrets> = Arc::new(Refreshing::networked(secrets));
         Self::new(db_path, secrets, connector, smtp_sender())
+    }
+
+    /// Signs in through the browser and saves the account. Blocking; run off
+    /// the UI thread. Set `cancel` to stop waiting for the browser.
+    pub fn sign_in(
+        &self,
+        provider: Provider,
+        hint: Option<EmailAddress>,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<Account, SyncError> {
+        let signed_in = (self.signer)(provider, hint.as_ref(), &|| cancel.load(Ordering::Relaxed))?;
+        let store = MailStore::open(&self.db_path)?;
+        let connector = Arc::clone(&self.connector);
+        add_oauth_account(
+            &store,
+            self.secrets.as_ref(),
+            provider,
+            &signed_in,
+            move |s: &ImapSettings, p: &str| connector(s, p),
+        )
     }
 
     /// Checks the sign-in and saves the account. Blocking; run off the UI thread.

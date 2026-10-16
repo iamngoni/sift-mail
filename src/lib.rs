@@ -6,6 +6,7 @@
 
 pub mod brand;
 pub mod domain;
+pub mod oauth;
 pub mod store;
 pub mod sync;
 pub mod theme;

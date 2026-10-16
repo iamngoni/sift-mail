@@ -16,5 +16,5 @@ pub use message::{
 };
 pub use outgoing::{Draft, DraftError, Recipients, ReplyContext};
 pub use provider::{Provider, SignIn};
-pub use server::{Host, HostError, ImapSettings, SmtpSettings, SyncCursor};
+pub use server::{AuthMethod, Host, HostError, ImapSettings, SmtpSettings, SyncCursor};
 pub use view::TriageView;

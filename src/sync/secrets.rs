@@ -5,9 +5,11 @@
 //! secret by account address; this module owns the service name.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::brand;
+use crate::domain::Provider;
+use crate::oauth::{OAuthConfig, OAuthError, ReqwestHttp, Tokens};
 
 /// A credential-store failure. The message never contains the secret.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -25,6 +27,60 @@ pub trait Secrets: Send + Sync {
     fn set(&self, key: &str, secret: &str) -> Result<(), SecretError>;
     /// Removes the secret for `key`. Removing a missing secret is fine.
     fn delete(&self, key: &str) -> Result<(), SecretError>;
+
+    /// Gets fresh OAuth tokens. Plain stores can't; [`Refreshing`] can.
+    fn refresh_tokens(&self, provider: Provider, _: &Tokens) -> Result<Tokens, OAuthError> {
+        Err(OAuthError::Provider(format!(
+            "{provider:?} tokens can't be refreshed here"
+        )))
+    }
+}
+
+/// Refreshes OAuth tokens for a provider.
+pub type TokenRefresher =
+    Arc<dyn Fn(Provider, &Tokens) -> Result<Tokens, OAuthError> + Send + Sync>;
+
+/// A secret store that can also refresh OAuth tokens.
+#[derive(Clone)]
+pub struct Refreshing {
+    inner: Arc<dyn Secrets>,
+    refresh: TokenRefresher,
+}
+
+impl Refreshing {
+    /// Wraps `inner`, refreshing with `refresh`.
+    pub fn new(inner: Arc<dyn Secrets>, refresh: TokenRefresher) -> Self {
+        Self { inner, refresh }
+    }
+
+    /// The production refresher: real token endpoints over TLS.
+    pub fn networked(inner: Arc<dyn Secrets>) -> Self {
+        Self::new(
+            inner,
+            Arc::new(|provider, tokens| {
+                let config = OAuthConfig::for_provider(provider)?;
+                crate::oauth::refresh(&ReqwestHttp::new()?, &config, tokens, chrono::Utc::now())
+            }),
+        )
+    }
+}
+
+impl Secrets for Refreshing {
+    fn get(&self, key: &str) -> Result<Option<String>, SecretError> {
+        self.inner.get(key)
+    }
+
+    fn set(&self, key: &str, secret: &str) -> Result<(), SecretError> {
+        self.inner.set(key, secret)
+    }
+
+    fn delete(&self, key: &str) -> Result<(), SecretError> {
+        self.inner.delete(key)
+    }
+
+    fn refresh_tokens(&self, provider: Provider, tokens: &Tokens) -> Result<Tokens, OAuthError> {
+        (self.refresh)(provider, tokens)
+    }
 }
 
 /// The operating system's credential store.

@@ -17,8 +17,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::domain::message::preview;
 use crate::domain::{
-    AccountId, Contact, EmailAddress, Host, ImapSettings, IncomingMessage, MessageId, Provider,
-    SmtpSettings, SyncCursor, ThreadRef, TriageState, TriageView, triage,
+    AccountId, AuthMethod, Contact, EmailAddress, Host, ImapSettings, IncomingMessage, MessageId,
+    Provider, SmtpSettings, SyncCursor, ThreadRef, TriageState, TriageView, triage,
 };
 
 /// Most threads returned by one [`MailStore::threads`] call.
@@ -501,16 +501,18 @@ impl MailStore {
     /// cursor is kept unless the server changed.
     pub fn save_imap(&self, account: AccountId, settings: &ImapSettings) -> StoreResult<()> {
         self.conn.execute(
-            "INSERT INTO imap_accounts (account_id, host, port, username) VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO imap_accounts (account_id, host, port, username, auth) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(account_id) DO UPDATE SET
                 uid_validity = CASE WHEN host = excluded.host THEN uid_validity END,
                 last_uid = CASE WHEN host = excluded.host THEN last_uid ELSE 0 END,
-                host = excluded.host, port = excluded.port, username = excluded.username",
+                host = excluded.host, port = excluded.port, username = excluded.username,
+                auth = excluded.auth",
             params![
                 account.0,
                 settings.host.as_str(),
                 settings.port,
-                settings.username
+                settings.username,
+                settings.auth.key()
             ],
         )?;
         Ok(())
@@ -519,7 +521,7 @@ impl MailStore {
     /// Every IMAP account with its settings and sync cursor.
     pub fn imap_accounts(&self) -> StoreResult<Vec<(Account, ImapSettings, SyncCursor)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT account_id, host, port, username, uid_validity, last_uid
+            "SELECT account_id, host, port, username, uid_validity, last_uid, auth
              FROM imap_accounts ORDER BY account_id",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -530,10 +532,13 @@ impl MailStore {
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<u32>>(4)?,
                 row.get::<_, u32>(5)?,
+                row.get::<_, String>(6)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, host, port, username, uid_validity, last_uid) = row?;
+            let (id, host, port, username, uid_validity, last_uid, auth) = row?;
+            let auth = AuthMethod::from_key(&auth)
+                .ok_or_else(|| StoreError::Corrupt(format!("auth method {auth:?}")))?;
             let account = self.account(AccountId(id))?.ok_or_else(|| {
                 StoreError::Corrupt(format!("imap settings for missing account {id}"))
             })?;
@@ -545,6 +550,7 @@ impl MailStore {
                     host,
                     port,
                     username,
+                    auth,
                 },
                 SyncCursor {
                     uid_validity,
@@ -592,6 +598,7 @@ impl MailStore {
                 host: Host::parse(&host)
                     .map_err(|_| StoreError::Corrupt(format!("smtp host {host:?}")))?,
                 port,
+                auth: imap.auth,
             },
             _ => default,
         }))
