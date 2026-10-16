@@ -55,6 +55,31 @@ pub(crate) struct CalendarState {
     pub(crate) offers: Option<(String, Vec<Offer>, Vec<Person>)>,
     /// The hold made from an offer, until its invite is sent.
     pub(crate) hold: Option<EventId>,
+    /// The last Find a time request.
+    pub(crate) search: Option<Search>,
+}
+
+/// What Find a time knows about the other people's calendars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Others {
+    /// Nobody else, or no way to ask.
+    Unknown,
+    /// Asking their provider.
+    Checking,
+    /// Their busy blocks, in local time.
+    Busy(Vec<Busy>),
+    /// The provider couldn't say; why.
+    Failed(String),
+}
+
+/// A Find a time request, kept so offers can be redone when calendars arrive.
+#[derive(Debug, Clone)]
+pub(crate) struct Search {
+    pub(crate) days: Vec<NaiveDate>,
+    pub(crate) minutes: i64,
+    pub(crate) people: Vec<Person>,
+    pub(crate) label: String,
+    pub(crate) others: Others,
 }
 
 /// Local wall-clock time of a UTC instant.
@@ -107,6 +132,7 @@ impl SiftApp {
             ask,
             offers: None,
             hold: None,
+            search: None,
         });
         self.focus.focus(window, cx);
         self.find_a_time(cx);
@@ -439,7 +465,8 @@ impl SiftApp {
             .collect()
     }
 
-    /// Reads the Find a time box and offers three times.
+    /// Reads the Find a time box, offers three of your free times at once,
+    /// and asks the provider about the other people's calendars.
     pub fn find_a_time(&mut self, cx: &mut Context<Self>) {
         let Some(c) = &self.calendar else {
             return;
@@ -465,29 +492,19 @@ impl SiftApp {
             Some(day) => vec![day],
             None => schedule::work_week(today, request.week).to_vec(),
         };
-        let busy = self.busy();
-        let found =
-            schedule::free_slots(&days, &busy, request.minutes, Local::now().naive_local(), 3);
-        let offers = found
-            .into_iter()
-            .map(|slot| {
-                let after = busy.iter().any(|b| b.end == slot.start);
-                let before = busy.iter().any(|b| b.start == slot.end);
-                Offer {
-                    start: slot.start,
-                    end: slot.end,
-                    note: match (after, before) {
-                        (true, _) => "You're free · right after your last meeting".into(),
-                        (_, true) => "You're free · before your next one".into(),
-                        _ => "You're free · nothing either side".into(),
-                    },
-                }
-            })
-            .collect();
         let when = match (request.day, request.week) {
             (Some(day), _) => day.format("%A").to_string(),
             (None, 1) => "Next week".into(),
             _ => "This week".into(),
+        };
+        let length = if request.minutes % 60 == 0 {
+            format!(
+                "{} hour{}",
+                request.minutes / 60,
+                if request.minutes == 60 { "" } else { "s" }
+            )
+        } else {
+            format!("{} minutes", request.minutes)
         };
         let with = if people.is_empty() {
             String::new()
@@ -501,20 +518,128 @@ impl SiftApp {
                     .join(" and ")
             )
         };
-        let summary = format!(
-            "{when}, {}{with}. These times avoid your calendar and focus blocks:",
-            if request.minutes % 60 == 0 {
-                format!(
-                    "{} hour{}",
-                    request.minutes / 60,
-                    if request.minutes == 60 { "" } else { "s" }
-                )
-            } else {
-                format!("{} minutes", request.minutes)
-            }
-        );
+        let account = self.organiser().map(|(id, _)| id);
+        let check = match (&self.sync, account, people.is_empty()) {
+            (Some(service), Some(account), false) => Some((service.clone(), account)),
+            _ => None,
+        };
         if let Some(c) = &mut self.calendar {
-            c.offers = Some((summary, offers, people));
+            c.search = Some(Search {
+                days: days.clone(),
+                minutes: request.minutes,
+                people: people.clone(),
+                label: format!("{when}, {length}{with}."),
+                others: if check.is_some() {
+                    Others::Checking
+                } else {
+                    Others::Unknown
+                },
+            });
+        }
+        self.show_offers(cx);
+        let Some((service, account)) = check else {
+            return;
+        };
+        let emails: Vec<_> = people.iter().map(|p| p.email.clone()).collect();
+        let from = utc(days[0].and_time(NaiveTime::MIN));
+        let to = utc((days[days.len() - 1] + chrono::Duration::days(1)).and_time(NaiveTime::MIN));
+        let task = cx
+            .background_executor()
+            .spawn(async move { service.free_busy(account, &emails, from, to) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |app, cx| {
+                if let Some(search) = app.calendar.as_mut().and_then(|c| c.search.as_mut()) {
+                    search.others = match result {
+                        Ok(people) => Others::Busy(
+                            people
+                                .into_iter()
+                                .flat_map(|p| p.busy)
+                                .map(|(s, e)| Busy {
+                                    start: local(s),
+                                    end: local(e),
+                                })
+                                .collect(),
+                        ),
+                        Err(error) => Others::Failed(error.to_string()),
+                    };
+                }
+                app.show_offers(cx);
+            })
+        })
+        .detach();
+    }
+
+    /// Recomputes the three offers from your busy time and, once known, theirs.
+    pub(crate) fn show_offers(&mut self, cx: &mut Context<Self>) {
+        let Some(search) = self.calendar.as_ref().and_then(|c| c.search.clone()) else {
+            return;
+        };
+        let mine = self.busy();
+        let theirs: &[Busy] = match &search.others {
+            Others::Busy(b) => b,
+            _ => &[],
+        };
+        let all: Vec<Busy> = mine.iter().chain(theirs).copied().collect();
+        let both = matches!(search.others, Others::Busy(_));
+        let found = schedule::free_slots(
+            &search.days,
+            &all,
+            search.minutes,
+            Local::now().naive_local(),
+            3,
+        );
+        let free = if both {
+            if search.people.len() == 1 {
+                format!("You and {} are both free", search.people[0].display())
+            } else {
+                "Everyone is free".to_owned()
+            }
+        } else {
+            "You're free".to_owned()
+        };
+        let offers = found
+            .into_iter()
+            .map(|slot| {
+                let after = mine.iter().any(|b| b.end == slot.start);
+                let before = mine.iter().any(|b| b.start == slot.end);
+                Offer {
+                    start: slot.start,
+                    end: slot.end,
+                    note: match (after, before) {
+                        (true, _) => format!("{free} · right after your last meeting"),
+                        (_, true) => format!("{free} · before your next one"),
+                        _ => free.clone(),
+                    },
+                }
+            })
+            .collect();
+        let names = search
+            .people
+            .iter()
+            .map(Person::display)
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let summary = match &search.others {
+            Others::Busy(_) => format!(
+                "{} These times avoid both calendars and your focus blocks:",
+                search.label
+            ),
+            Others::Checking => format!(
+                "{} Checking {names}'s calendar… for now these avoid yours:",
+                search.label
+            ),
+            Others::Failed(why) => format!(
+                "{} {names}'s calendar couldn't be checked ({why}), so these only avoid yours:",
+                search.label
+            ),
+            Others::Unknown => format!(
+                "{} These times avoid your calendar and focus blocks:",
+                search.label
+            ),
+        };
+        if let Some(c) = &mut self.calendar {
+            c.offers = Some((summary, offers, search.people));
         }
         cx.notify();
     }

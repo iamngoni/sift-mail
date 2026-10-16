@@ -465,3 +465,17 @@ fn real_http_client_posts_forms_and_returns_status_and_body() {
     assert!(request.contains("application/x-www-form-urlencoded"));
     assert!(request.contains("SiftMail/"));
 }
+
+#[test]
+fn calendar_permission_is_asked_for_at_consent() {
+    let pkce = Pkce::generate().unwrap();
+    let url = authorize_url(&ms(), &pkce, "http://127.0.0.1:1/callback", None);
+    assert!(url.contains("Calendars.Read.Shared"), "{url}");
+    assert!(
+        !ms().scopes.contains("graph.microsoft.com"),
+        "token requests stay single-service"
+    );
+    let g = OAuthConfig::for_provider_with(Provider::Google, &settings).unwrap();
+    assert!(g.scopes.contains("calendar.freebusy"));
+    assert!(g.consent_only.is_empty());
+}

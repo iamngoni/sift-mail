@@ -293,3 +293,78 @@ fn plain_stores_cannot_refresh() {
         .unwrap_err();
     assert!(err.to_string().contains("can't be refreshed"));
 }
+
+#[test]
+fn other_peoples_calendars_come_from_the_provider() {
+    let dir = std::env::temp_dir().join(format!("sift-freebusy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let long = |email: &str| SignedIn {
+        tokens: Tokens {
+            access_token: "at-1".into(),
+            refresh_token: "rt".into(),
+            expires_at: Utc::now() + Duration::days(3650),
+        },
+        email: EmailAddress::parse(email).unwrap(),
+        name: None,
+    };
+    let svc = service(&dir)
+        .with_signer(Arc::new(move |provider, _, _, _| {
+            Ok(long(if provider == Provider::Google { "you@gmail.com" } else { "you@company.com" }))
+        }))
+        .with_calendars(
+            Arc::new(|url: &str, token: &str, body: &str| {
+                assert!(body.contains("priya@company.com"));
+                if url.contains("graph.microsoft.com") {
+                    assert_eq!(token, "graph-token");
+                    Ok((200, r#"{"value":[{"scheduleId":"priya@company.com","scheduleItems":[{"status":"busy","start":{"dateTime":"2026-10-19T09:00:00"},"end":{"dateTime":"2026-10-19T10:00:00"}}]}]}"#.into()))
+                } else {
+                    assert_eq!(token, "at-1");
+                    Ok((403, String::new()))
+                }
+            }),
+            Arc::new(|tokens: &Tokens| {
+                assert_eq!(tokens.refresh_token, "rt");
+                Ok("graph-token".into())
+            }),
+        );
+    let work = svc
+        .sign_in(
+            Provider::Microsoft365,
+            None,
+            Arc::default(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+    let priya = [EmailAddress::parse("priya@company.com").unwrap()];
+    let (from, to) = (now(), now() + Duration::days(7));
+    let busy = svc.free_busy(work.id, &priya, from, to).unwrap();
+    assert_eq!(busy[0].busy.len(), 1);
+
+    let gmail = svc
+        .sign_in(
+            Provider::Google,
+            None,
+            Arc::default(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+    let denied = svc.free_busy(gmail.id, &priya, from, to).unwrap_err();
+    assert!(denied.to_string().contains("sign in again"));
+
+    let fast = EmailAddress::parse("you@fastmail.com").unwrap();
+    let imap = svc
+        .add_account(AddAccountRequest {
+            name: "Fastmail".into(),
+            settings: ImapSettings::for_address(&fast, Provider::Imap),
+            email: fast,
+            provider: Provider::Imap,
+            password: "at-1".into(),
+        })
+        .unwrap();
+    assert!(svc.free_busy(imap.id, &priya, from, to).is_err());
+    assert!(svc.free_busy(AccountId(999), &priya, from, to).is_err());
+
+    // A service without its saved sign-in can't ask.
+    assert!(service(&dir).free_busy(work.id, &priya, from, to).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

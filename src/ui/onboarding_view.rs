@@ -2,14 +2,19 @@
 //! words on the left and a live picture of each choice on the right ("the
 //! stage"), progress dots above, and Back / Skip / Next below.
 //!
-//! The board animates the stage; Sift shows the same scenes still, which is
-//! also what the board does for people who prefer reduced motion.
+//! The stage moves like the board: mail falls through the sift into bins
+//! that bob, each stage glides in, and Focus pings and the final badges pop in
+//! one after another. GPUI holds every animation still when the system asks
+//! for reduced motion, which is also what the board does.
+
+use std::time::Duration;
 
 use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, FontWeight, SharedString, Stateful, TestSupportExt as _, div,
-    px,
+    Animation, AnimationExt as _, AnyElement, ClickEvent, Context, ElementId, FontWeight,
+    SharedString, Stateful, TestSupportExt as _, div, ease_in_out, ease_out_quint,
+    pulsating_between, px,
 };
 
 use super::add_account::short_name;
@@ -160,6 +165,49 @@ fn stage(p: &Palette) -> gpui_kit::Div {
         .bg(p.bg_subtle)
 }
 
+/// Where a repeating animation is `offset` of a cycle later, so a group of
+/// them runs out of step.
+fn shifted(t: f32, offset: f32) -> f32 {
+    (t + offset).fract()
+}
+
+/// A falling envelope fades in at the top and out as it reaches the sift.
+fn fall_opacity(s: f32) -> f32 {
+    (s / 0.15).min((1.0 - s) / 0.25).clamp(0.0, 1.0)
+}
+
+/// The delay before the `index`th of a staggered group arrives.
+fn stagger(index: usize) -> Duration {
+    Duration::from_millis(120 + 70 * u64::try_from(index).unwrap_or(0))
+}
+
+/// Fades `element` in once after `delay`, rising `lift` pixels as it does.
+fn arrive(
+    id: impl Into<ElementId>,
+    element: gpui_kit::Div,
+    delay: Duration,
+    lift: f32,
+) -> AnyElement {
+    element
+        .with_animations(
+            id,
+            vec![
+                Animation::new(delay.max(Duration::from_millis(1))),
+                Animation::new(Duration::from_millis(420)).with_easing(ease_out_quint()),
+            ],
+            move |el, step, t| {
+                let t = if step == 0 { 0.0 } else { t };
+                let el = el.opacity(t);
+                if lift == 0.0 {
+                    el
+                } else {
+                    el.relative().top(px((1.0 - t) * lift))
+                }
+            },
+        )
+        .into_any_element()
+}
+
 fn card(p: &Palette) -> gpui_kit::Div {
     div()
         .rounded(px(radius::CARD))
@@ -262,8 +310,12 @@ impl SiftApp {
             ("Flash sale!", 5, 42.0, 110.0),
         ]
         .into_iter()
-        .map(|(label, tint, left, top)| {
+        .enumerate()
+        .map(|(i, (label, tint, left, top))| {
             let (bg, ink) = tints[tint];
+            // Each envelope falls the height of the scene, starting where the
+            // still picture puts it, so reduced motion shows the board's layout.
+            let offset = (top + 34.0) / 194.0;
             div()
                 .absolute()
                 .left(gpui_kit::relative(left / 100.0))
@@ -293,6 +345,14 @@ impl SiftApp {
                         .child(initials(label)),
                 )
                 .child(label)
+                .with_animation(
+                    ("drop", i),
+                    Animation::new(Duration::from_millis(4800)).repeat(),
+                    move |el, t| {
+                        let s = shifted(t, offset);
+                        el.top(px(-34.0 + 194.0 * s)).opacity(fall_opacity(s))
+                    },
+                )
                 .into_any_element()
         })
         .collect();
@@ -302,9 +362,12 @@ impl SiftApp {
             ("Read later", 77, TriageView::Newsletters),
         ]
         .into_iter()
-        .map(|(label, n, view)| {
+        .enumerate()
+        .map(|(i, (label, n, view))| {
+            let offset = i as f32 / 3.0;
             card(p)
                 .flex_1()
+                .relative()
                 .p(px(14.0))
                 .flex()
                 .flex_col()
@@ -325,6 +388,16 @@ impl SiftApp {
                         .text_size(px(text::META))
                         .text_color(p.ink_3)
                         .child(label),
+                )
+                .with_animation(
+                    ("bin", i),
+                    Animation::new(Duration::from_millis(2400))
+                        .repeat()
+                        .with_easing(ease_in_out),
+                    move |el, t| {
+                        let s = shifted(t, offset);
+                        el.top(px(-4.0 * (s * std::f32::consts::TAU).sin().max(0.0)))
+                    },
                 )
                 .into_any_element()
         })
@@ -385,7 +458,14 @@ impl SiftApp {
             .child(
                 stage(p)
                     .justify_end()
-                    .child(div().relative().w_full().h(px(160.0)).children(drops))
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(px(160.0))
+                            .overflow_hidden()
+                            .children(drops),
+                    )
                     .child(
                         div()
                             .w_full()
@@ -399,7 +479,14 @@ impl SiftApp {
                             .bg(p.accent_soft)
                             .text_color(p.accent_text)
                             .font_weight(FontWeight::BOLD)
-                            .child("sift"),
+                            .child("sift")
+                            .with_animation(
+                                "sift-bar",
+                                Animation::new(Duration::from_millis(2400))
+                                    .repeat()
+                                    .with_easing(pulsating_between(0.7, 1.0)),
+                                |el, t| el.opacity(t),
+                            ),
                     )
                     .child(div().w_full().flex().gap(px(12.0)).children(bins)),
             )
@@ -569,7 +656,13 @@ impl SiftApp {
                                     }),
                             ),
                     )
-                    .child(stage_view),
+                    // Keyed by step, so each new stage glides in.
+                    .child(arrive(
+                        ("stage-in", step.index()),
+                        div().flex_1().min_w_0().flex().child(stage_view),
+                        Duration::ZERO,
+                        16.0,
+                    )),
             )
             .into_any_element()
     }
@@ -1228,13 +1321,17 @@ impl SiftApp {
                     .text_size(px(text::SMALL))
                     .font_weight(FontWeight::BOLD)
                     .children(label)
-                    .into_any_element()
             };
-        let mut pings: Vec<AnyElement> = Vec::new();
+        let mut pings: Vec<gpui_kit::Div> = Vec::new();
+        let mode = match self.notify_mode {
+            NotifyMode::All => 0,
+            NotifyMode::Hold => 1,
+            NotifyMode::Never => 2,
+        };
         match self.notify_mode {
             NotifyMode::All => {
                 for i in 0..24 {
-                    pings.push(ping(i as f32 / 24.0, 8.0, p.accent, None).into_any_element());
+                    pings.push(ping(i as f32 / 24.0, 8.0, p.accent, None));
                 }
                 pings.extend(urgent.map(|u| ping(at(u), 12.0, p.danger, None)));
             }
@@ -1282,7 +1379,19 @@ impl SiftApp {
                                     .h(px(2.0))
                                     .bg(p.line_strong),
                             )
-                            .children(pings),
+                            .children(pings.into_iter().enumerate().map(|(i, ping)| {
+                                // Keyed by mode too, so changing it pops them in again.
+                                let id = ("ping", mode * 100 + i);
+                                ping.with_animations(
+                                    id,
+                                    vec![
+                                        Animation::new(Duration::from_millis(1 + 25 * i as u64)),
+                                        Animation::new(Duration::from_millis(360))
+                                            .with_easing(ease_out_quint()),
+                                    ],
+                                    |el, step, t| el.opacity(if step == 0 { 0.0 } else { t }),
+                                )
+                            })),
                     )
                     .child(
                         div()
@@ -1768,11 +1877,16 @@ impl SiftApp {
             chips.push(("Focus", Lucide::Clock.into()));
         }
         stage(p)
-            .child(
-                Icon::new(IconName::CircleCheck)
-                    .size(px(40.0))
-                    .text_color(p.good),
-            )
+            .child(arrive(
+                "done-check",
+                div().child(
+                    Icon::new(IconName::CircleCheck)
+                        .size(px(40.0))
+                        .text_color(p.good),
+                ),
+                stagger(0),
+                12.0,
+            ))
             .child(
                 div()
                     .text_size(px(20.0))
@@ -1785,8 +1899,8 @@ impl SiftApp {
                     .flex_wrap()
                     .justify_center()
                     .gap(px(8.0))
-                    .children(chips.into_iter().map(|(label, icon)| {
-                        div()
+                    .children(chips.into_iter().enumerate().map(|(i, (label, icon))| {
+                        let chip = div()
                             .h(px(30.0))
                             .px(px(10.0))
                             .flex()
@@ -1797,9 +1911,24 @@ impl SiftApp {
                             .border_color(p.line_strong)
                             .bg(p.bg)
                             .child(icon.size(px(14.0)).text_color(p.accent))
-                            .child(label)
+                            .child(label);
+                        arrive(("done-chip", i), chip, stagger(i + 2), 8.0)
                     })),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn motion_runs_out_of_step_and_fades_at_the_ends() {
+        assert!((shifted(0.75, 0.5) - 0.25).abs() < 1e-6);
+        assert_eq!(fall_opacity(0.0), 0.0);
+        assert_eq!(fall_opacity(0.5), 1.0);
+        assert_eq!(fall_opacity(1.0), 0.0);
+        assert!(stagger(2) > stagger(1));
     }
 }
