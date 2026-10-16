@@ -59,64 +59,87 @@ impl Render for SiftApp {
                         .child(message),
                 )
             })
-            .when(self.settings.is_some(), |root| {
+            .when(self.onboarding.is_some(), |root| {
                 root.child(
                     div()
                         .relative()
                         .flex_1()
                         .min_h_0()
                         .flex()
-                        .child(self.settings_screen(&p, cx))
+                        .child(self.onboarding_screen(&p, cx))
                         .when(self.form.is_some(), |area| {
                             area.child(self.add_account_dialog(&p, cx))
                         }),
                 )
             })
-            .when(self.settings.is_none(), |root| {
-                root.child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .when(self.sidebar, |area| area.child(self.sidebar(&p, cx)))
-                        .child(
-                            div()
-                                .relative()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .child(body)
-                                .child(self.dock(&p, sift.appearance(), cx)),
-                        )
-                        .children(self.overlay_layer(&p, cx))
-                        .when(self.snoozing.is_some(), |area| {
-                            area.child(self.snooze_menu(&p, cx))
-                        })
-                        .when(self.form.is_some(), |area| {
-                            area.child(self.add_account_dialog(&p, cx))
-                        })
-                        .when(self.compose.is_some(), |area| {
-                            area.child(self.compose_dialog(&p, cx))
-                        }),
-                )
-            })
+            .when(
+                self.settings.is_some() && self.onboarding.is_none(),
+                |root| {
+                    root.child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .child(self.settings_screen(&p, cx))
+                            .when(self.form.is_some(), |area| {
+                                area.child(self.add_account_dialog(&p, cx))
+                            }),
+                    )
+                },
+            )
+            .when(
+                self.settings.is_none() && self.onboarding.is_none(),
+                |root| {
+                    root.child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .when(self.sidebar, |area| area.child(self.sidebar(&p, cx)))
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .child(body)
+                                    .child(self.dock(&p, sift.appearance(), cx)),
+                            )
+                            .children(self.overlay_layer(&p, cx))
+                            .when(self.snoozing.is_some(), |area| {
+                                area.child(self.snooze_menu(&p, cx))
+                            })
+                            .when(self.form.is_some(), |area| {
+                                area.child(self.add_account_dialog(&p, cx))
+                            })
+                            .when(self.compose.is_some(), |area| {
+                                area.child(self.compose_dialog(&p, cx))
+                            }),
+                    )
+                },
+            )
     }
 }
 
 impl SiftApp {
     fn title_bar(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let in_settings = self.settings.is_some();
-        let mut tabs: Vec<AnyElement> = if in_settings {
+        let onboarding = self.onboarding.is_some();
+        let mut tabs: Vec<AnyElement> = if onboarding {
+            Vec::new()
+        } else if in_settings {
             vec![self.back_to_mail_tab(p, cx)]
         } else {
             TriageView::ALL
                 .into_iter()
+                .filter(|v| self.tab_shown(*v))
                 .map(|view| self.tab(view, p, cx))
                 .collect()
         };
-        if !in_settings {
+        if !in_settings && !onboarding {
             tabs.extend(self.custom_tabs(p, cx));
         }
         TitleBar::new()
@@ -144,7 +167,13 @@ impl SiftApp {
                     .child(div().flex().items_center().gap(px(2.0)).children(tabs)),
             )
             .child(div().flex_1())
-            .when(!in_settings, |bar| bar.child(self.title_actions(p, cx)))
+            .when(onboarding, |bar| {
+                bar.children(self.onboarding_sync_chip(p))
+                    .child(div().w(px(12.0)))
+            })
+            .when(!in_settings && !onboarding, |bar| {
+                bar.child(self.title_actions(p, cx))
+            })
     }
 
     fn back_to_mail_tab(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {

@@ -27,6 +27,16 @@ pub enum Pref {
     Onboarded,
     /// Store id of the account new mail is sent from.
     DefaultFrom,
+    /// `views` (sorted into tabs) or `plain` (one list).
+    SortMode,
+    /// Comma-separated view keys shown as tabs.
+    Views,
+    /// Comma-separated AI helpers that are on.
+    AiFeatures,
+    /// `hold`, `all` or `none`.
+    NotifyMode,
+    /// Comma-separated check-in times, such as `12:00,17:00`.
+    Checkins,
 }
 
 impl Pref {
@@ -39,6 +49,11 @@ impl Pref {
             Self::Density => "density",
             Self::Onboarded => "onboarded",
             Self::DefaultFrom => "default_from",
+            Self::SortMode => "sort_mode",
+            Self::Views => "views",
+            Self::AiFeatures => "ai_features",
+            Self::NotifyMode => "notify_mode",
+            Self::Checkins => "checkins",
         }
     }
 }
@@ -490,6 +505,11 @@ mod tests {
             "unreadable falls back"
         );
         for p in [
+            Pref::SortMode,
+            Pref::Views,
+            Pref::AiFeatures,
+            Pref::NotifyMode,
+            Pref::Checkins,
             Pref::Appearance,
             Pref::Summaries,
             Pref::HoldNotifications,

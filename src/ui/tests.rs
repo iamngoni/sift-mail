@@ -16,6 +16,9 @@ pub(super) fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, E
     cx.update(|cx| {
         gpui_kit::init(cx);
         let store = MailStore::open_in_memory().unwrap();
+        store
+            .set_preference(crate::store::Pref::Onboarded, "true")
+            .unwrap();
         if seeded {
             demo::seed(&store, Utc::now()).unwrap();
         }
@@ -342,6 +345,23 @@ pub(super) mod sync_ui {
         db: &std::path::Path,
         signer: Option<crate::sync::service::Signer>,
     ) -> (AnyWindowHandle, Entity<SiftApp>) {
+        open_service(cx, db, signer, true)
+    }
+
+    /// A brand-new install with a working sync service: onboarding shows.
+    pub(in crate::ui) fn open_first_run(
+        cx: &mut TestAppContext,
+        db: &std::path::Path,
+    ) -> (AnyWindowHandle, Entity<SiftApp>) {
+        open_service(cx, db, None, false)
+    }
+
+    fn open_service(
+        cx: &mut TestAppContext,
+        db: &std::path::Path,
+        signer: Option<crate::sync::service::Signer>,
+        onboarded: bool,
+    ) -> (AnyWindowHandle, Entity<SiftApp>) {
         let connector: Connector = Arc::new(|_, password: &str| {
             if password == "right" {
                 Ok(Box::new(Inbox) as BoxedSession)
@@ -370,6 +390,11 @@ pub(super) mod sync_ui {
         cx.update(|cx| {
             gpui_kit::init(cx);
             let store = MailStore::open(&db).unwrap();
+            if onboarded {
+                store
+                    .set_preference(crate::store::Pref::Onboarded, "true")
+                    .unwrap();
+            }
             let view = open_main_window(Rc::new(store), Some(service), cx).unwrap();
             let handle = *cx.windows().first().unwrap();
             (handle, view)

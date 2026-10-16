@@ -44,6 +44,7 @@ src/
     tokens.rs    the design tokens from the style spec (single source of truth)
     mod.rs       turns tokens into the GPUI Kit theme; light, dark, match system
   domain/
+    choices.rs   onboarding choices: sort mode, views, AI helpers, notifications
     email.rs     EmailAddress, parsed once at the boundary
     message.rs   messages, threads, contacts, triage state
     triage.rs    rule-based sorting into views
@@ -76,6 +77,8 @@ src/
     accounts.rs  background sync and status
     add_account.rs  the four-step Add account flow: choose, sign in, set up, connect
     add_account_view.rs  how that flow looks
+    onboarding.rs  first-run onboarding: welcome, six choices, summary
+    onboarding_view.rs  how onboarding looks
     settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
                  connection, removal), default From, appearance, notifications, keyboard
     settings_view.rs  how Settings looks

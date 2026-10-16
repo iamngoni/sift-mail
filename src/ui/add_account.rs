@@ -293,7 +293,7 @@ impl SiftApp {
     pub fn can_close_add_account(&self) -> bool {
         self.form
             .as_ref()
-            .is_some_and(|f| !f.first_run || f.step == Step::Sync)
+            .is_some_and(|f| !f.first_run || f.step == Step::Sync || self.onboarding.is_some())
     }
 
     /// Closes the flow. Cancels a pending browser sign-in, and lets an account
