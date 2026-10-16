@@ -18,7 +18,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::domain::message::preview;
 use crate::domain::{
     AccountId, Contact, EmailAddress, Host, ImapSettings, IncomingMessage, MessageId, Provider,
-    SyncCursor, ThreadRef, TriageState, TriageView, triage,
+    SmtpSettings, SyncCursor, ThreadRef, TriageState, TriageView, triage,
 };
 
 /// Most threads returned by one [`MailStore::threads`] call.
@@ -110,6 +110,12 @@ pub struct MessageDetail {
     pub received_at: DateTime<Utc>,
     /// Has attachments.
     pub has_attachments: bool,
+    /// Provider id, such as `"7:42"` for IMAP UIDVALIDITY 7, UID 42.
+    pub remote_id: String,
+    /// `Message-ID` without brackets, if the message had one.
+    pub message_id: Option<String>,
+    /// `References` without brackets, oldest first.
+    pub references: Vec<String>,
 }
 
 /// Inbox counts per view, for the tab badges.
@@ -240,8 +246,9 @@ impl MailStore {
                 let view = triage::classify(&message.from, message.signals);
                 tx.execute(
                     "INSERT INTO messages (account_id, remote_id, thread_key, from_name, from_email,
-                        subject, preview, body_text, received_at, is_read, has_attachments, view)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        subject, preview, body_text, received_at, is_read, has_attachments, view,
+                        message_id, refs)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         message.account.0,
                         message.remote_id,
@@ -255,6 +262,8 @@ impl MailStore {
                         message.is_read,
                         message.has_attachments,
                         view.key(),
+                        message.message_id,
+                        message.references.join(" "),
                     ],
                 )?;
                 // New mail reopens the conversation.
@@ -266,6 +275,52 @@ impl MailStore {
                 tx.last_insert_rowid()
             }
         };
+        tx.commit()?;
+        Ok(MessageId(id))
+    }
+
+    /// Stores a message the user sent. It joins its thread without changing
+    /// the thread's view or state, and is always read.
+    pub fn record_sent(&self, message: &IncomingMessage) -> StoreResult<MessageId> {
+        let tx = self.conn.unchecked_transaction()?;
+        let existing: Option<(String, String, Option<i64>)> = tx
+            .query_row(
+                "SELECT view, state, snoozed_until FROM messages
+                 WHERE account_id = ?1 AND thread_key = ?2 ORDER BY received_at DESC, id DESC LIMIT 1",
+                params![message.account.0, message.thread_key],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let (view, state, until) = existing
+            .unwrap_or_else(|| (TriageView::Other.key().to_owned(), "done".to_owned(), None));
+        tx.execute(
+            "INSERT INTO messages (account_id, remote_id, thread_key, from_name, from_email,
+                subject, preview, body_text, received_at, is_read, has_attachments, view,
+                message_id, refs, state, snoozed_until)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 0, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(account_id, remote_id) DO NOTHING",
+            params![
+                message.account.0,
+                message.remote_id,
+                message.thread_key,
+                message.from.name(),
+                message.from.email().as_str(),
+                message.subject,
+                preview(&message.body_text),
+                message.body_text,
+                message.received_at.timestamp(),
+                view,
+                message.message_id,
+                message.references.join(" "),
+                state,
+                until,
+            ],
+        )?;
+        let id = tx.query_row(
+            "SELECT id FROM messages WHERE account_id = ?1 AND remote_id = ?2",
+            params![message.account.0, message.remote_id],
+            |row| row.get(0),
+        )?;
         tx.commit()?;
         Ok(MessageId(id))
     }
@@ -338,7 +393,8 @@ impl MailStore {
     /// All messages in a thread, oldest first.
     pub fn thread_messages(&self, thread: &ThreadRef) -> StoreResult<Vec<MessageDetail>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT id, from_name, from_email, subject, body_text, received_at, has_attachments
+            "SELECT id, from_name, from_email, subject, body_text, received_at, has_attachments,
+                    remote_id, message_id, refs
              FROM messages WHERE account_id = ?1 AND thread_key = ?2
              ORDER BY received_at, id",
         )?;
@@ -351,10 +407,24 @@ impl MailStore {
                 row.get::<_, String>(4)?,
                 row.get::<_, i64>(5)?,
                 row.get::<_, bool>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, name, email, subject, body_text, at, has_attachments) = row?;
+            let (
+                id,
+                name,
+                email,
+                subject,
+                body_text,
+                at,
+                has_attachments,
+                remote_id,
+                message_id,
+                refs,
+            ) = row?;
             Ok(MessageDetail {
                 id: MessageId(id),
                 from: Contact::new(name.as_deref(), parse_email(&email)?),
@@ -362,6 +432,9 @@ impl MailStore {
                 body_text,
                 received_at: timestamp(at)?,
                 has_attachments,
+                remote_id,
+                message_id,
+                references: refs.split_whitespace().map(str::to_owned).collect(),
             })
         })
         .collect()
@@ -487,6 +560,48 @@ impl MailStore {
         self.conn.execute(
             "UPDATE imap_accounts SET uid_validity = ?2, last_uid = ?3 WHERE account_id = ?1",
             params![account.0, cursor.uid_validity, cursor.last_uid],
+        )?;
+        Ok(())
+    }
+
+    /// One IMAP account with its settings and cursor, if `account` is IMAP.
+    pub fn imap_account(
+        &self,
+        account: AccountId,
+    ) -> StoreResult<Option<(Account, ImapSettings, SyncCursor)>> {
+        Ok(self
+            .imap_accounts()?
+            .into_iter()
+            .find(|(a, _, _)| a.id == account))
+    }
+
+    /// Outgoing settings: the saved override, else the best guess from the
+    /// IMAP settings. `None` if `account` isn't an IMAP account.
+    pub fn smtp_settings(&self, account: AccountId) -> StoreResult<Option<SmtpSettings>> {
+        let Some((acct, imap, _)) = self.imap_account(account)? else {
+            return Ok(None);
+        };
+        let saved: (Option<String>, Option<u16>) = self.conn.query_row(
+            "SELECT smtp_host, smtp_port FROM imap_accounts WHERE account_id = ?1",
+            [account.0],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let default = SmtpSettings::for_imap(&acct.email, acct.provider, &imap);
+        Ok(Some(match saved {
+            (Some(host), Some(port)) => SmtpSettings {
+                host: Host::parse(&host)
+                    .map_err(|_| StoreError::Corrupt(format!("smtp host {host:?}")))?,
+                port,
+            },
+            _ => default,
+        }))
+    }
+
+    /// Saves an outgoing-server override for an account.
+    pub fn save_smtp(&self, account: AccountId, smtp: &SmtpSettings) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE imap_accounts SET smtp_host = ?2, smtp_port = ?3 WHERE account_id = ?1",
+            params![account.0, smtp.host.as_str(), smtp.port],
         )?;
         Ok(())
     }

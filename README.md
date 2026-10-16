@@ -7,10 +7,12 @@ component library).
 > **Status: early.** IMAP accounts work: add one with **Add account** (iCloud,
 > Fastmail, Gmail with an app password, or any IMAP server) and Sift fetches
 > the last 90 days of your INBOX, then checks for new mail every 3 minutes.
-> Passwords live in the OS credential store. The inbox supports views, day
-> sections, reading threads, Done, Snooze, read/unread and Undo from the
-> keyboard. Sync is one-way for now (Sift never changes anything on the
-> server). Microsoft 365 and Google sign-in are next. Try it with sample mail:
+> Passwords live in the OS credential store. Reply from any thread or write a
+> new message; mail goes out over SMTP with proper threading headers and a
+> copy is saved to your server's Sent folder. Reading a thread marks it read
+> on the server too. The inbox supports views, day sections, Done, Snooze,
+> read/unread and Undo from the keyboard. Done and Snooze are local to Sift
+> for now. Microsoft 365 and Google sign-in are next. Try it with sample mail:
 >
 > ```sh
 > SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
@@ -50,13 +52,16 @@ src/
     demo.rs      sample mail, only with --features demo and in tests
   sync/
     parse.rs     raw RFC 5322 mail to messages: threading, triage signals, HTML to text
-    imap.rs      IMAP over TLS: incremental UID sync, UIDVALIDITY resets
+    imap.rs      IMAP over TLS: incremental UID sync, read flags, Sent folder
+    smtp.rs      building MIME with threading headers; SMTP over TLS
+    send.rs      send flow: SMTP, Sent copy, local copy, thread done; read write-back
     secrets.rs   passwords in the OS credential store
     service.rs   background sync with its own database connection
   ui/
     mod.rs       window options, opening the store and the main window
     app.rs       inbox state and actions, keyboard handling
     accounts.rs  Add account dialog, background sync and status
+    compose.rs   reply box and New message dialog
     render.rs    title bar, list, reader, snooze menu, toasts
 ```
 
@@ -72,6 +77,9 @@ src/
 | `S`, then `1`–`3` | Snooze: later today, tomorrow, next week |
 | `U` | Toggle read |
 | `Z` | Undo |
+| `R` | Reply to the open thread |
+| `C` | New message |
+| `Ctrl` + `Enter` (`Cmd` on macOS) | Send |
 
 Design tokens come from the approved style spec. Change colours, radii, spacing
 or type in `src/theme/tokens.rs` and both GPUI Kit components and Sift's own

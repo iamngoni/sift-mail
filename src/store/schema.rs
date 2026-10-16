@@ -44,6 +44,11 @@ const MIGRATIONS: &[&str] = &[
         uid_validity INTEGER,
         last_uid INTEGER NOT NULL DEFAULT 0
      );",
+    // 3: message ids for reply threading; optional SMTP overrides per account.
+    "ALTER TABLE messages ADD COLUMN message_id TEXT;
+     ALTER TABLE messages ADD COLUMN refs TEXT NOT NULL DEFAULT '';
+     ALTER TABLE imap_accounts ADD COLUMN smtp_host TEXT;
+     ALTER TABLE imap_accounts ADD COLUMN smtp_port INTEGER;",
 ];
 
 /// Brings `conn` up to the latest schema.

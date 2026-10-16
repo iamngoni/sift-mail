@@ -123,6 +123,10 @@ pub struct IncomingMessage {
     pub has_attachments: bool,
     /// Classification inputs.
     pub signals: Signals,
+    /// `Message-ID` without angle brackets, used to thread replies.
+    pub message_id: Option<String>,
+    /// `References` ids without angle brackets, oldest first.
+    pub references: Vec<String>,
 }
 
 /// Where a thread is in the user's workflow. Each state carries exactly the

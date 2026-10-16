@@ -301,12 +301,25 @@ mod sync_ui {
                 body: b"From: Lena <lena@fastmail.com>\r\nTo: you@fastmail.com\r\nSubject: Hello from IMAP\r\nMessage-ID: <h@x>\r\n\r\nHi!\r\n".to_vec(),
             }])
         }
+        fn set_seen(&mut self, _: &[u32], _: bool) -> Result<(), SyncError> {
+            Ok(())
+        }
+        fn append_sent(&mut self, _: &[u8]) -> Result<bool, SyncError> {
+            Ok(true)
+        }
     }
 
     fn temp_db(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("sift-ui-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("mail.db")
+    }
+
+    pub(super) fn open_synced_pub(
+        cx: &mut TestAppContext,
+        db: &std::path::Path,
+    ) -> (AnyWindowHandle, Entity<SiftApp>) {
+        open_synced(cx, db)
     }
 
     fn open_synced(
@@ -324,6 +337,14 @@ mod sync_ui {
             db.to_path_buf(),
             Arc::new(MemorySecrets::default()),
             connector,
+            Arc::new(|_, _, _, message| {
+                let text = String::from_utf8(message.formatted()).unwrap_or_default();
+                if text.contains("To: fail@") {
+                    Err(SyncError::Protocol("550 rejected".into()))
+                } else {
+                    Ok(())
+                }
+            }),
         );
         let db = db.to_path_buf();
         cx.update(|cx| {
@@ -436,5 +457,206 @@ mod sync_ui {
         assert!(read(cx, &view, |a| a
             .form_error()
             .is_some_and(|e| e.contains("can't save"))));
+    }
+}
+
+mod compose_ui {
+    use super::*;
+
+    fn add_account(cx: &mut TestAppContext, handle: AnyWindowHandle, view: &Entity<SiftApp>) {
+        click(cx, handle, "add-account");
+        sync_ui_fill(cx, handle, view, "you@fastmail.com", "right", "");
+        click(cx, handle, "connect");
+        cx.run_until_parked();
+    }
+
+    fn sync_ui_fill(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        view: &Entity<SiftApp>,
+        email: &str,
+        password: &str,
+        server: &str,
+    ) {
+        let view = view.clone();
+        cx.update_window(handle, |_, window, cx| {
+            let (e, p, s) = view.read_with(cx, |app, _| {
+                let f = app.form.as_ref().unwrap();
+                (f.email.clone(), f.password.clone(), f.server.clone())
+            });
+            e.update(cx, |state, cx| {
+                state.set_value(email.to_owned(), window, cx)
+            });
+            p.update(cx, |state, cx| {
+                state.set_value(password.to_owned(), window, cx)
+            });
+            s.update(cx, |state, cx| {
+                state.set_value(server.to_owned(), window, cx)
+            });
+        })
+        .unwrap();
+    }
+
+    fn type_reply(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        view: &Entity<SiftApp>,
+        text: &str,
+    ) {
+        let view = view.clone();
+        cx.update_window(handle, |_, window, cx| {
+            let reply = view.read_with(cx, |app, _| app.reply_box.clone().unwrap());
+            reply.update(cx, |state, cx| state.set_value(text.to_owned(), window, cx));
+        })
+        .unwrap();
+    }
+
+    fn compose(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        view: &Entity<SiftApp>,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) {
+        let view = view.clone();
+        cx.update_window(handle, |_, window, cx| {
+            let (t, s, b) = view.read_with(cx, |app, _| {
+                let c = app.compose.as_ref().unwrap();
+                (c.to.clone(), c.subject.clone(), c.body.clone())
+            });
+            t.update(cx, |state, cx| state.set_value(to.to_owned(), window, cx));
+            s.update(cx, |state, cx| {
+                state.set_value(subject.to_owned(), window, cx)
+            });
+            b.update(cx, |state, cx| state.set_value(body.to_owned(), window, cx));
+        })
+        .unwrap();
+    }
+
+    fn temp_db(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sift-compose-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join("mail.db")
+    }
+
+    #[gpui_kit::test]
+    fn replying_sends_and_marks_the_thread_done(cx: &mut TestAppContext) {
+        let db = temp_db("reply");
+        let (handle, view) = super::sync_ui::open_synced_pub(cx, &db);
+        add_account(cx, handle, &view);
+        assert_eq!(
+            read(cx, &view, SiftApp::listed_subjects),
+            ["Hello from IMAP"]
+        );
+
+        press(cx, handle, &["enter", "r"]);
+        cx.run_until_parked();
+        // Shortcut keys typed into the reply box stay in the reply box.
+        press(cx, handle, &["e", "s", "2"]);
+        assert!(read(cx, &view, |a| a.open_subject().is_some()
+            && !a.is_snoozing()));
+
+        type_reply(cx, handle, &view, "   ");
+        press(cx, handle, &["ctrl-enter"]);
+        assert_eq!(
+            read(cx, &view, |a| a.compose_error().map(str::to_owned)),
+            Some("Write something before sending.".into())
+        );
+
+        type_reply(cx, handle, &view, "Thanks Lena!");
+        click(cx, handle, "send-reply");
+        cx.run_until_parked();
+        assert_eq!(
+            read(cx, &view, |a| a.toast_text().map(str::to_owned)),
+            Some("Reply sent to Lena · thread done".into())
+        );
+        assert!(read(cx, &view, |a| a.open_subject().is_none()));
+        assert!(
+            read(cx, &view, SiftApp::listed_subjects).is_empty(),
+            "replied thread is done"
+        );
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn escape_leaves_the_reply_box(cx: &mut TestAppContext) {
+        let db = temp_db("escape");
+        let (handle, view) = super::sync_ui::open_synced_pub(cx, &db);
+        add_account(cx, handle, &view);
+        press(cx, handle, &["enter", "r", "escape", "e"]);
+        assert!(
+            read(cx, &view, SiftApp::listed_subjects).is_empty(),
+            "E works again after Esc"
+        );
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn composing_a_new_message(cx: &mut TestAppContext) {
+        let db = temp_db("new");
+        let (handle, view) = super::sync_ui::open_synced_pub(cx, &db);
+
+        press(cx, handle, &["c"]);
+        assert!(read(cx, &view, SiftApp::is_composing));
+        compose(cx, handle, &view, "lena@company.com", "Hi", "Hello");
+        click(cx, handle, "compose-send");
+        assert_eq!(
+            read(cx, &view, |a| a.compose_error().map(str::to_owned)),
+            Some("Add an account before sending mail.".into())
+        );
+        click(cx, handle, "compose-cancel");
+        assert!(!read(cx, &view, SiftApp::is_composing));
+
+        add_account(cx, handle, &view);
+        click(cx, handle, "new-message");
+        compose(cx, handle, &view, "", "Hi", "Hello");
+        press(cx, handle, &["ctrl-enter"]);
+        assert_eq!(
+            read(cx, &view, |a| a.compose_error().map(str::to_owned)),
+            Some("Add at least one recipient.".into())
+        );
+
+        compose(cx, handle, &view, "fail@company.com", "Hi", "Hello");
+        click(cx, handle, "compose-send");
+        cx.run_until_parked();
+        assert!(read(cx, &view, |a| a
+            .compose_error()
+            .is_some_and(|e| e.contains("550 rejected"))));
+        assert!(
+            read(cx, &view, SiftApp::is_composing),
+            "the draft is kept after a failure"
+        );
+
+        compose(
+            cx,
+            handle,
+            &view,
+            "lena@company.com, tom@company.com",
+            "Hi",
+            "Hello",
+        );
+        click(cx, handle, "compose-send");
+        assert!(read(cx, &view, SiftApp::is_sending));
+        cx.run_until_parked();
+        assert!(!read(cx, &view, SiftApp::is_composing));
+        assert_eq!(
+            read(cx, &view, |a| a.toast_text().map(str::to_owned)),
+            Some("Sent to lena, tom".into())
+        );
+        press(cx, handle, &["c", "escape"]);
+        assert!(!read(cx, &view, SiftApp::is_composing));
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn without_a_service_mail_cannot_be_sent(cx: &mut TestAppContext) {
+        let (handle, view) = open(cx, true);
+        press(cx, handle, &["enter", "r"]);
+        type_reply(cx, handle, &view, "Hi");
+        click(cx, handle, "send-reply");
+        assert!(read(cx, &view, |a| a
+            .compose_error()
+            .is_some_and(|e| e.contains("can't send"))));
     }
 }

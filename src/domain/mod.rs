@@ -3,6 +3,7 @@
 
 pub mod email;
 pub mod message;
+pub mod outgoing;
 pub mod provider;
 pub mod server;
 pub mod time;
@@ -13,6 +14,7 @@ pub use email::{EmailAddress, EmailError};
 pub use message::{
     AccountId, Contact, IncomingMessage, MessageId, Signals, ThreadRef, TriageState,
 };
+pub use outgoing::{Draft, DraftError, Recipients, ReplyContext};
 pub use provider::{Provider, SignIn};
-pub use server::{Host, HostError, ImapSettings, SyncCursor};
+pub use server::{Host, HostError, ImapSettings, SmtpSettings, SyncCursor};
 pub use view::TriageView;

@@ -76,6 +76,11 @@ pub trait MailSession {
     fn uid_search(&mut self, query: &str) -> Result<Vec<u32>, SyncError>;
     /// Fetches full messages by UID, without setting `\Seen`.
     fn uid_fetch(&mut self, uids: &[u32]) -> Result<Vec<RawMessage>, SyncError>;
+    /// Adds or removes `\Seen` on INBOX messages (SELECTs the INBOX read-write).
+    fn set_seen(&mut self, uids: &[u32], seen: bool) -> Result<(), SyncError>;
+    /// Appends a sent message to the mailbox marked `\Sent`. Returns `false`
+    /// when the server has no Sent mailbox, so nothing was saved.
+    fn append_sent(&mut self, raw: &[u8]) -> Result<bool, SyncError>;
 }
 
 /// What one sync run did.
@@ -195,6 +200,43 @@ impl<T: Read + Write> MailSession for ImapSession<T> {
                 })
             })
             .collect())
+    }
+
+    fn set_seen(&mut self, uids: &[u32], seen: bool) -> Result<(), SyncError> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+        self.0.select("INBOX").map_err(protocol)?;
+        let set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let op = if seen {
+            "+FLAGS.SILENT (\\Seen)"
+        } else {
+            "-FLAGS.SILENT (\\Seen)"
+        };
+        self.0.uid_store(set, op).map_err(protocol)?;
+        Ok(())
+    }
+
+    fn append_sent(&mut self, raw: &[u8]) -> Result<bool, SyncError> {
+        let names = self.0.list(Some(""), Some("*")).map_err(protocol)?;
+        let sent = names.iter().find(|n| {
+            n.attributes()
+                .iter()
+                .any(|a| matches!(a, imap_proto::NameAttribute::Sent))
+        });
+        let Some(sent) = sent.map(|n| n.name().to_owned()) else {
+            return Ok(false);
+        };
+        self.0
+            .append(&sent, raw)
+            .flag(imap::types::Flag::Seen)
+            .finish()
+            .map_err(protocol)?;
+        Ok(true)
     }
 }
 

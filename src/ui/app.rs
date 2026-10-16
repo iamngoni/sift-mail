@@ -8,7 +8,8 @@
 use std::rc::Rc;
 
 use chrono::{Local, Utc};
-use gpui_kit::{Context, FocusHandle, KeyDownEvent, Window};
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::{Context, Entity, FocusHandle, Focusable as _, KeyDownEvent, Window};
 
 use crate::domain::time::{SnoozeOption, snooze_options};
 use crate::domain::{ThreadRef, TriageState, TriageView};
@@ -16,6 +17,7 @@ use crate::store::{MailStore, MessageDetail, ThreadQuery, ThreadSummary, ViewCou
 use crate::sync::service::SyncService;
 
 use super::accounts::AddAccountForm;
+use super::compose::ComposeForm;
 
 /// The thread currently open in the reader.
 pub(crate) struct OpenThread {
@@ -50,6 +52,14 @@ pub struct SiftApp {
     pub(crate) sync_status: Option<String>,
     /// The Add account dialog, while open.
     pub(crate) form: Option<AddAccountForm>,
+    /// The reply box under an open thread; created on first render of a thread.
+    pub(crate) reply_box: Option<Entity<TextareaState>>,
+    /// Why the last reply couldn't be sent.
+    pub(crate) reply_error: Option<String>,
+    /// A message is being sent.
+    pub(crate) sending: bool,
+    /// The New message dialog, while open.
+    pub(crate) compose: Option<ComposeForm>,
 }
 
 impl SiftApp {
@@ -79,6 +89,10 @@ impl SiftApp {
             syncing: false,
             sync_status: None,
             form: None,
+            reply_box: None,
+            reply_error: None,
+            sending: false,
+            compose: None,
         };
         app.reload();
         app.schedule_sync(cx);
@@ -185,6 +199,17 @@ impl SiftApp {
             .and_then(|()| self.store.thread_messages(&summary.thread));
         match opened {
             Ok(messages) => {
+                if summary.unread {
+                    self.push_read(summary.thread.clone(), true, cx);
+                }
+                if self
+                    .open
+                    .as_ref()
+                    .is_none_or(|o| o.summary.thread != summary.thread)
+                {
+                    self.reply_box = None;
+                    self.reply_error = None;
+                }
                 self.open = Some(OpenThread { summary, messages });
                 self.reload();
             }
@@ -260,8 +285,9 @@ impl SiftApp {
             .iter()
             .find(|t| t.thread == thread)
             .is_some_and(|t| t.unread);
-        if let Err(error) = self.store.set_read(&thread, unread) {
-            self.error = Some(format!("Sift couldn't update that thread: {error}"));
+        match self.store.set_read(&thread, unread) {
+            Ok(()) => self.push_read(thread, unread, cx),
+            Err(error) => self.error = Some(format!("Sift couldn't update that thread: {error}")),
         }
         self.open = None;
         self.reload();
@@ -314,19 +340,29 @@ impl SiftApp {
     pub(crate) fn on_key_down(
         &mut self,
         event: &KeyDownEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let keystroke = &event.keystroke;
+        let key = keystroke.key.as_str();
+        let replying = self
+            .reply_box
+            .as_ref()
+            .is_some_and(|b| b.read(cx).focus_handle(cx).is_focused(window));
         if keystroke.modifiers.modified() {
             return;
         }
-        let key = keystroke.key.as_str();
         let digit = key.parse::<u8>().ok();
-        if self.form.is_some() {
-            // Typing goes to the dialog's inputs; only Escape is ours.
+        if self.form.is_some() || self.compose.is_some() || replying {
+            // Typing goes to the text boxes; only Escape is ours.
             if key == "escape" {
-                self.close_add_account(cx);
+                if self.form.is_some() {
+                    self.close_add_account(cx);
+                } else if self.compose.is_some() {
+                    self.close_compose(cx);
+                } else {
+                    self.focus.focus(window, cx);
+                }
                 cx.stop_propagation();
             }
             return;
@@ -349,6 +385,8 @@ impl SiftApp {
                 "s" => self.start_snooze(cx),
                 "u" => self.toggle_read(cx),
                 "z" => self.undo(cx),
+                "r" if self.open.is_some() => self.focus_reply(window, cx),
+                "c" => self.open_compose(window, cx),
                 _ => return,
             }
         }

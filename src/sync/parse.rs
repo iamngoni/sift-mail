@@ -101,6 +101,11 @@ pub fn parse(raw: &[u8], envelope: &Envelope<'_>) -> Result<IncomingMessage, Par
         is_read: envelope.is_read,
         has_attachments: message.attachment_count() > 0,
         signals,
+        message_id: message
+            .message_id()
+            .map(clean_id)
+            .filter(|id| !id.is_empty()),
+        references: all_ids(message.references()),
     })
 }
 
@@ -119,6 +124,19 @@ pub fn thread_key(
         .map(|id| id.trim_matches(['<', '>', ' ']).to_ascii_lowercase())
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| format!("local:{remote_id}"))
+}
+
+/// Strips angle brackets and spaces from a message id.
+fn clean_id(id: &str) -> String {
+    id.trim_matches(['<', '>', ' ']).to_owned()
+}
+
+fn all_ids(value: &HeaderValue<'_>) -> Vec<String> {
+    match value {
+        HeaderValue::Text(text) => vec![clean_id(text)],
+        HeaderValue::TextList(list) => list.iter().map(|t| clean_id(t)).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn first_id<'a>(value: &'a HeaderValue<'a>) -> Option<&'a str> {
@@ -250,6 +268,8 @@ Hi,\r\n\r\nCould you send the numbers by Monday?\r\n";
         );
         assert_eq!(m.received_at.to_rfc3339(), "2026-10-16T07:42:00+00:00");
         assert_eq!(m.thread_key, "root@company.com");
+        assert_eq!(m.message_id.as_deref(), Some("reply-2@company.com"));
+        assert_eq!(m.references, ["root@company.com", "reply-1@company.com"]);
         assert_eq!(m.remote_id, "7:42");
         assert!(m.signals.addressed_to_me, "To match is case-insensitive");
         assert!(!m.signals.mailing_list && !m.signals.calendar_invite && !m.signals.auto_submitted);

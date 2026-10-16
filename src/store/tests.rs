@@ -42,6 +42,8 @@ impl Fixture {
                 is_read: false,
                 has_attachments: remote.ends_with('a'),
                 signals,
+                message_id: Some(format!("{remote}@x.com")),
+                references: Vec::new(),
             })
             .unwrap()
     }
@@ -221,6 +223,8 @@ fn redelivery_updates_read_state_without_duplicating() {
             is_read: true,
             has_attachments: false,
             signals: TO_ME,
+            message_id: None,
+            references: Vec::new(),
         })
         .unwrap();
     assert_eq!(first, again);
