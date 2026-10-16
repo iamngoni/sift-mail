@@ -35,6 +35,15 @@ const MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX messages_thread ON messages (account_id, thread_key);
      CREATE INDEX messages_inbox ON messages (state, received_at DESC);",
+    // 2: IMAP server settings and sync cursors, one row per IMAP account.
+    "CREATE TABLE imap_accounts (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        uid_validity INTEGER,
+        last_uid INTEGER NOT NULL DEFAULT 0
+     );",
 ];
 
 /// Brings `conn` up to the latest schema.

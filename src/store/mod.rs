@@ -17,8 +17,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::domain::message::preview;
 use crate::domain::{
-    AccountId, Contact, EmailAddress, IncomingMessage, MessageId, Provider, ThreadRef, TriageState,
-    TriageView, triage,
+    AccountId, Contact, EmailAddress, Host, ImapSettings, IncomingMessage, MessageId, Provider,
+    SyncCursor, ThreadRef, TriageState, TriageView, triage,
 };
 
 /// Most threads returned by one [`MailStore::threads`] call.
@@ -130,6 +130,7 @@ impl ViewCounts {
 /// The SQLite-backed store. Cheap to share behind an `Rc`; all methods take `&self`.
 pub struct MailStore {
     conn: Connection,
+    path: Option<PathBuf>,
 }
 
 impl MailStore {
@@ -146,19 +147,19 @@ impl MailStore {
                 source,
             })?;
         }
-        Self::from_connection(Connection::open(path)?)
+        Self::from_connection(Connection::open(path)?, Some(path.to_path_buf()))
     }
 
     /// A throwaway store in memory, for tests and previews.
     pub fn open_in_memory() -> StoreResult<Self> {
-        Self::from_connection(Connection::open_in_memory()?)
+        Self::from_connection(Connection::open_in_memory()?, None)
     }
 
-    fn from_connection(conn: Connection) -> StoreResult<Self> {
+    fn from_connection(conn: Connection, path: Option<PathBuf>) -> StoreResult<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         schema::migrate(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, path })
     }
 
     /// Adds an account, or returns the existing one with the same address.
@@ -415,6 +416,86 @@ impl MailStore {
     /// The triage state of a thread.
     pub fn state(&self, thread: &ThreadRef) -> StoreResult<TriageState> {
         read_state(&self.conn, thread)
+    }
+
+    /// The database file, or `None` for an in-memory store. Background sync
+    /// opens its own connection to this path.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Saves (or replaces) the IMAP server settings for an account. The sync
+    /// cursor is kept unless the server changed.
+    pub fn save_imap(&self, account: AccountId, settings: &ImapSettings) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO imap_accounts (account_id, host, port, username) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(account_id) DO UPDATE SET
+                uid_validity = CASE WHEN host = excluded.host THEN uid_validity END,
+                last_uid = CASE WHEN host = excluded.host THEN last_uid ELSE 0 END,
+                host = excluded.host, port = excluded.port, username = excluded.username",
+            params![
+                account.0,
+                settings.host.as_str(),
+                settings.port,
+                settings.username
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Every IMAP account with its settings and sync cursor.
+    pub fn imap_accounts(&self) -> StoreResult<Vec<(Account, ImapSettings, SyncCursor)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT account_id, host, port, username, uid_validity, last_uid
+             FROM imap_accounts ORDER BY account_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u16>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<u32>>(4)?,
+                row.get::<_, u32>(5)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (id, host, port, username, uid_validity, last_uid) = row?;
+            let account = self.account(AccountId(id))?.ok_or_else(|| {
+                StoreError::Corrupt(format!("imap settings for missing account {id}"))
+            })?;
+            let host =
+                Host::parse(&host).map_err(|_| StoreError::Corrupt(format!("host {host:?}")))?;
+            Ok((
+                account,
+                ImapSettings {
+                    host,
+                    port,
+                    username,
+                },
+                SyncCursor {
+                    uid_validity,
+                    last_uid,
+                },
+            ))
+        })
+        .collect()
+    }
+
+    /// Records how far an IMAP account has synced.
+    pub fn set_cursor(&self, account: AccountId, cursor: SyncCursor) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE imap_accounts SET uid_validity = ?2, last_uid = ?3 WHERE account_id = ?1",
+            params![account.0, cursor.uid_validity, cursor.last_uid],
+        )?;
+        Ok(())
+    }
+
+    /// Removes an account and everything stored for it. Mail on the server is untouched.
+    pub fn remove_account(&self, account: AccountId) -> StoreResult<()> {
+        self.conn
+            .execute("DELETE FROM accounts WHERE id = ?1", [account.0])?;
+        Ok(())
     }
 }
 

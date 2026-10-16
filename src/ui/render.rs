@@ -68,6 +68,9 @@ impl Render for SiftApp {
                     .child(self.dock(&p, sift.appearance(), cx))
                     .when(self.snoozing.is_some(), |area| {
                         area.child(self.snooze_menu(&p, cx))
+                    })
+                    .when(self.form.is_some(), |area| {
+                        area.child(self.add_account_dialog(&p, cx))
                     }),
             )
     }
@@ -102,6 +105,63 @@ impl SiftApp {
                     )
                     .child(div().w(px(8.0)))
                     .child(div().flex().items_center().gap(px(2.0)).children(tabs)),
+            )
+            .child(div().flex_1())
+            .child(self.title_actions(p, cx))
+    }
+
+    fn title_actions(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let hover = p.bg_hover;
+        let status = self.sync_status.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .pr(px(8.0))
+            .when_some(status, |d, status| {
+                d.child(
+                    div()
+                        .max_w(px(320.0))
+                        .truncate()
+                        .text_size(px(text::META))
+                        .text_color(p.ink_3)
+                        .child(status),
+                )
+            })
+            .when(self.sync.is_some(), |d| {
+                d.child(
+                    div()
+                        .id("sync-now")
+                        .size(px(size::ICON_BUTTON))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(radius::BUTTON))
+                        .text_color(p.ink_2)
+                        .hover(move |s| s.bg(hover))
+                        .child(Icon::new(IconName::RefreshCw).size(px(16.0)))
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.start_sync(cx)))
+                        .test_support(),
+                )
+            })
+            .child(
+                div()
+                    .id("add-account")
+                    .h(px(size::ICON_BUTTON))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .rounded_full()
+                    .bg(p.primary)
+                    .text_color(p.primary_ink)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(Icon::new(IconName::Plus).size(px(14.0)))
+                    .child("Add account")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.open_add_account(window, cx);
+                    }))
+                    .test_support(),
             )
     }
 
@@ -336,7 +396,7 @@ impl SiftApp {
         let (title, body) = if self.store.accounts().map(|a| a.is_empty()).unwrap_or(false) {
             (
                 "No mail to sift yet".to_owned(),
-                "Welcome to Sift Mail. Connecting accounts is the next piece being built.",
+                "Welcome to Sift Mail. Add an account to start sifting.",
             )
         } else if self.unread_only {
             (

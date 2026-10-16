@@ -1,6 +1,7 @@
 //! Windows and views. [`open_main_window`] is the only way the app opens UI,
 //! so tests exercise exactly what users see.
 
+mod accounts;
 mod app;
 mod render;
 
@@ -18,6 +19,7 @@ use gpui_kit::{
 
 use crate::brand;
 use crate::store::{MailStore, StoreResult};
+use crate::sync::service::SyncService;
 use crate::theme::{self, Appearance};
 
 /// Default window size on first launch, in logical pixels.
@@ -66,11 +68,15 @@ pub fn open_default_store() -> StoreResult<MailStore> {
 
 /// Installs the theme and opens the main window over `store`. Call once,
 /// after `gpui_kit::init`.
-pub fn open_main_window(store: Rc<MailStore>, cx: &mut App) -> Result<gpui_kit::Entity<SiftApp>> {
+pub fn open_main_window(
+    store: Rc<MailStore>,
+    sync: Option<SyncService>,
+    cx: &mut App,
+) -> Result<gpui_kit::Entity<SiftApp>> {
     theme::install(Appearance::System, cx)?;
     let options = main_window_options(cx);
     let (_, view) = gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| SiftApp::new(store, window, cx))
+        cx.new(|cx| SiftApp::new(store, sync, window, cx))
     })?;
     Ok(view)
 }
