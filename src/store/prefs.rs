@@ -309,6 +309,26 @@ impl MailStore {
         )?)
     }
 
+    /// Holds an account back from sync while it is being set up (`false`), or
+    /// lets it sync (`true`).
+    pub fn set_ready(&self, account: AccountId, ready: bool) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE accounts SET ready = ?2 WHERE id = ?1",
+            params![account.0, ready],
+        )?;
+        Ok(())
+    }
+
+    /// Messages stored for an account, in any state.
+    pub fn message_count(&self, account: AccountId) -> StoreResult<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE account_id = ?1",
+            [account.0],
+            |r| r.get(0),
+        )?;
+        Ok(usize::try_from(n).unwrap_or_default())
+    }
+
     /// Records a successful sync.
     pub fn record_sync_ok(&self, account: AccountId, at: DateTime<Utc>) -> StoreResult<()> {
         self.conn.execute(
@@ -559,6 +579,10 @@ mod tests {
         let good = s.account_health(id).unwrap();
         assert!(!good.needs_sign_in && good.last_error.is_none());
         assert_eq!(good.last_sync.map(|t| t.timestamp()), Some(now.timestamp()));
+        assert_eq!(s.message_count(id).unwrap(), 0);
+        s.set_ready(id, false).unwrap();
+        assert!(s.imap_accounts().unwrap().is_empty());
+        s.set_ready(id, true).unwrap();
         s.set_preference(Pref::DefaultFrom, "1").unwrap();
         assert_eq!(
             s.preference(Pref::DefaultFrom).unwrap().as_deref(),

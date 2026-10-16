@@ -6,8 +6,9 @@ component library).
 
 > **Status: early.** Add an account with **Add account**: sign in with
 > Microsoft 365 or Google in your browser (see [Sign-in setup](#sign-in-setup)),
-> or use a password for iCloud, Fastmail or any IMAP server. Sift fetches the
-> last 90 days of your INBOX, then checks for new mail every 3 minutes.
+> or a password for iCloud, Fastmail or any IMAP server (server settings are
+> filled in and editable). Choose a name, colour and how far back to sync, then
+> watch the first sync. New mail is checked every 3 minutes.
 > Passwords and sign-in tokens live in the OS credential store. Reply from any
 > thread or write a new message; mail goes out over SMTP with proper threading
 > headers and a copy is saved to your server's Sent folder. Reading a thread
@@ -72,7 +73,9 @@ src/
     app.rs       inbox state and actions, keyboard handling
     chrome.rs    sidebar, account filter, palette, dialogs, bulk selection, preferences
     chrome_view.rs  how those look
-    accounts.rs  Add account dialog, background sync and status
+    accounts.rs  background sync and status
+    add_account.rs  the four-step Add account flow: choose, sign in, set up, connect
+    add_account_view.rs  how that flow looks
     settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
                  connection, removal), default From, appearance, notifications, keyboard
     settings_view.rs  how Settings looks
