@@ -13,8 +13,6 @@ use super::parse::{Envelope, attachments, parse};
 use crate::domain::{AuthMethod, EmailAddress, ImapSettings, SyncCursor};
 use crate::store::{Account, MailStore, StoreError};
 
-/// How far back the first sync of an account reaches.
-pub const INITIAL_DAYS: i64 = 90;
 /// Messages fetched per round trip.
 pub const BATCH: usize = 50;
 
@@ -49,6 +47,24 @@ pub enum SyncError {
     /// Writing to the local store failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+impl SyncError {
+    /// Whether signing in again would fix it: the password or token stopped
+    /// working, or none is saved.
+    pub fn needs_sign_in(&self) -> bool {
+        use crate::oauth::OAuthError;
+        matches!(
+            self,
+            Self::Auth
+                | Self::NoPassword
+                | Self::OAuth(
+                    OAuthError::Provider(_)
+                        | OAuthError::AdminApprovalRequired
+                        | OAuthError::NotConfigured { .. }
+                )
+        )
+    }
 }
 
 /// What the INBOX looks like on the server.
@@ -114,10 +130,14 @@ pub fn sync_inbox(
     }
     cursor.uid_validity = info.uid_validity;
 
-    let query = if cursor.last_uid == 0 {
-        format!("SINCE {}", imap_date(now - Duration::days(INITIAL_DAYS)))
-    } else {
-        format!("UID {}:*", cursor.last_uid + 1)
+    // The first sync reaches back as far as the account's sync range.
+    let range = store.account_settings(account.id)?.range;
+    let query = match (cursor.last_uid, range.days()) {
+        (0, Some(days)) => format!("SINCE {}", imap_date(now - Duration::days(days))),
+        (0, None) => "ALL".to_owned(),
+        _ => {
+            format!("UID {}:*", cursor.last_uid + 1)
+        }
     };
     let mut uids: Vec<u32> = session
         .uid_search(&query)?

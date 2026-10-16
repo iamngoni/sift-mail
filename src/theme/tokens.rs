@@ -49,6 +49,16 @@ pub struct Palette {
     pub warn: Rgb,
     /// Destructive actions.
     pub danger: Rgb,
+    /// Background of success pills.
+    pub good_soft: Rgb,
+    /// Background of warning banners and pills.
+    pub warn_soft: Rgb,
+    /// Border of warning banners.
+    pub warn_line: Rgb,
+    /// Hovered destructive buttons.
+    pub danger_soft: Rgb,
+    /// Border of destructive buttons.
+    pub danger_line: Rgb,
 }
 
 /// The light appearance.
@@ -73,6 +83,12 @@ pub const LIGHT: Palette = Palette {
     good: Rgb::from_u32(0x1F7A4A),
     warn: Rgb::from_u32(0xB4541C),
     danger: Rgb::from_u32(0xC42B1C),
+    good_soft: Rgb::from_u32(0xE6F4EA),
+    // The board used FCEBDD; lightened so warn text keeps 4.5:1.
+    warn_soft: Rgb::from_u32(0xFEF3EA),
+    warn_line: Rgb::from_u32(0xF2CDB0),
+    danger_soft: Rgb::from_u32(0xFDECEA),
+    danger_line: Rgb::from_u32(0xF3C1BC),
 };
 
 /// The dark appearance.
@@ -97,28 +113,36 @@ pub const DARK: Palette = Palette {
     good: Rgb::from_u32(0x5BC88A),
     warn: Rgb::from_u32(0xF2A36B),
     danger: Rgb::from_u32(0xFF8A7A),
+    good_soft: Rgb::from_u32(0x15301F),
+    warn_soft: Rgb::from_u32(0x36230F),
+    warn_line: Rgb::from_u32(0x5F3E1C),
+    danger_soft: Rgb::from_u32(0x3A1A17),
+    danger_line: Rgb::from_u32(0x6B2A24),
 };
 
 /// Account avatar tints, light appearance: (background, text). Accounts pick
 /// one by index so two inboxes are easy to tell apart.
 pub const AVATARS_LIGHT: [(Rgb, Rgb); 6] = [
-    (Rgb::from_u32(0xF1F0FA), Rgb::from_u32(0x5B44B8)),
-    (Rgb::from_u32(0xE6F4EC), Rgb::from_u32(0x1F6B42)),
-    (Rgb::from_u32(0xFDEEE3), Rgb::from_u32(0x9A4413)),
-    (Rgb::from_u32(0xE5F0FB), Rgb::from_u32(0x1D5C99)),
-    (Rgb::from_u32(0xFBE9EF), Rgb::from_u32(0xA3264F)),
-    (Rgb::from_u32(0xF0F0F2), Rgb::from_u32(0x3F3F46)),
+    (Rgb::from_u32(0xE7E3FB), Rgb::from_u32(0x4A36A8)),
+    (Rgb::from_u32(0xFCE7DA), Rgb::from_u32(0x8A3A10)),
+    (Rgb::from_u32(0xE0F0E5), Rgb::from_u32(0x1E5B33)),
+    (Rgb::from_u32(0xE3ECFB), Rgb::from_u32(0x1F3F86)),
+    (Rgb::from_u32(0xFBEFD0), Rgb::from_u32(0x6E4B07)),
+    (Rgb::from_u32(0xDFF0F1), Rgb::from_u32(0x1C5A60)),
 ];
 
 /// Account avatar tints, dark appearance.
 pub const AVATARS_DARK: [(Rgb, Rgb); 6] = [
-    (Rgb::from_u32(0x2A2545), Rgb::from_u32(0xC9BFFF)),
-    (Rgb::from_u32(0x1C3328), Rgb::from_u32(0x8EDDB0)),
-    (Rgb::from_u32(0x3A2618), Rgb::from_u32(0xF6BC92)),
-    (Rgb::from_u32(0x1A2C40), Rgb::from_u32(0x9CC8F5)),
-    (Rgb::from_u32(0x3B1E29), Rgb::from_u32(0xF5A3BE)),
-    (Rgb::from_u32(0x26262B), Rgb::from_u32(0xC8C8CE)),
+    (Rgb::from_u32(0x2C2550), Rgb::from_u32(0xCFC6FF)),
+    (Rgb::from_u32(0x3A2418), Rgb::from_u32(0xF5C3A3)),
+    (Rgb::from_u32(0x1C3324), Rgb::from_u32(0xA8DDB8)),
+    (Rgb::from_u32(0x1C2742), Rgb::from_u32(0xB5C8F5)),
+    (Rgb::from_u32(0x3A2E12), Rgb::from_u32(0xF2D69A)),
+    (Rgb::from_u32(0x183235), Rgb::from_u32(0xA6D9DD)),
 ];
+
+/// Names of the account colours, in index order.
+pub const AVATAR_NAMES: [&str; 6] = ["Violet", "Clay", "Green", "Blue", "Amber", "Teal"];
 
 /// The avatar tints for `palette`.
 pub fn avatar_tints(palette: &Palette) -> &'static [(Rgb, Rgb); 6] {
@@ -219,6 +243,9 @@ mod tests {
             ("good on bg", palette.good, palette.bg),
             ("warn on bg", palette.warn, palette.bg),
             ("danger on bg", palette.danger, palette.bg),
+            ("good on good_soft", palette.good, palette.good_soft),
+            ("warn on warn_soft", palette.warn, palette.warn_soft),
+            ("danger on danger_soft", palette.danger, palette.danger_soft),
         ];
         for (label, fg, bg) in pairs {
             let ratio = fg.contrast(bg);

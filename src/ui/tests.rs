@@ -281,7 +281,7 @@ fn default_store_opens() {
 
 // ---------- accounts and sync ----------
 
-mod sync_ui {
+pub(super) mod sync_ui {
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -317,13 +317,13 @@ mod sync_ui {
         }
     }
 
-    fn temp_db(name: &str) -> PathBuf {
+    pub(in crate::ui) fn temp_db(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("sift-ui-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("mail.db")
     }
 
-    pub(super) fn open_synced_pub(
+    pub(in crate::ui) fn open_synced_pub(
         cx: &mut TestAppContext,
         db: &std::path::Path,
     ) -> (AnyWindowHandle, Entity<SiftApp>) {
@@ -484,10 +484,14 @@ mod sync_ui {
     }
 }
 
-mod compose_ui {
+pub(super) mod compose_ui {
     use super::*;
 
-    fn add_account(cx: &mut TestAppContext, handle: AnyWindowHandle, view: &Entity<SiftApp>) {
+    pub(in crate::ui) fn add_account(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        view: &Entity<SiftApp>,
+    ) {
         click(cx, handle, "account-switcher");
         click(cx, handle, "add-account");
         sync_ui_fill(cx, handle, view, "you@fastmail.com", "right", "");

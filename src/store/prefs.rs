@@ -4,6 +4,7 @@
 //! Preferences are a typed key set ([`Pref`]); unknown stored values fall
 //! back to the documented default rather than failing the app.
 
+use chrono::{DateTime, Utc};
 use rusqlite::{OptionalExtension, params};
 
 use super::{MailStore, StoreError, StoreResult};
@@ -24,6 +25,8 @@ pub enum Pref {
     Density,
     /// `true` once onboarding has been finished or skipped.
     Onboarded,
+    /// Store id of the account new mail is sent from.
+    DefaultFrom,
 }
 
 impl Pref {
@@ -35,6 +38,7 @@ impl Pref {
             Self::HoldNotifications => "hold_notifications",
             Self::Density => "density",
             Self::Onboarded => "onboarded",
+            Self::DefaultFrom => "default_from",
         }
     }
 }
@@ -151,6 +155,21 @@ pub struct AccountSettings {
     pub ai: bool,
     /// How much mail to keep.
     pub range: SyncRange,
+    /// Sync the account's calendar (Microsoft 365 and Google).
+    pub calendar: bool,
+    /// Sync the account's contacts (Microsoft 365 and Google).
+    pub contacts: bool,
+}
+
+/// How an account's last sync went.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AccountHealth {
+    /// When it last synced successfully.
+    pub last_sync: Option<DateTime<Utc>>,
+    /// The saved password or sign-in stopped working.
+    pub needs_sign_in: bool,
+    /// Why the last sync failed, if it did.
+    pub last_error: Option<String>,
 }
 
 /// Number of avatar tints an account colour can pick from.
@@ -226,29 +245,26 @@ impl MailStore {
 
     /// Settings for an account.
     pub fn account_settings(&self, account: AccountId) -> StoreResult<AccountSettings> {
-        let row: (i64, String, bool, String, bool, i64) = self.conn.query_row(
-            "SELECT colour, signature, in_all, notify, ai, sync_days FROM accounts WHERE id = ?1",
+        Ok(self.conn.query_row(
+            "SELECT colour, signature, in_all, notify, ai, sync_days, sync_calendar, sync_contacts
+             FROM accounts WHERE id = ?1",
             [account.0],
             |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                ))
+                Ok(AccountSettings {
+                    colour: u8::try_from(
+                        r.get::<_, i64>(0)?.rem_euclid(i64::from(ACCOUNT_COLOURS)),
+                    )
+                    .unwrap_or_default(),
+                    signature: r.get(1)?,
+                    in_all: r.get(2)?,
+                    notify: NotifyLevel::from_key(&r.get::<_, String>(3)?),
+                    ai: r.get(4)?,
+                    range: SyncRange::from_days(r.get(5)?),
+                    calendar: r.get(6)?,
+                    contacts: r.get(7)?,
+                })
             },
-        )?;
-        let (colour, signature, in_all, notify, ai, days) = row;
-        Ok(AccountSettings {
-            colour: u8::try_from(colour.rem_euclid(i64::from(ACCOUNT_COLOURS))).unwrap_or_default(),
-            signature,
-            in_all,
-            notify: NotifyLevel::from_key(&notify),
-            ai,
-            range: SyncRange::from_days(days),
-        })
+        )?)
     }
 
     /// Saves settings for an account.
@@ -259,7 +275,7 @@ impl MailStore {
     ) -> StoreResult<()> {
         self.conn.execute(
             "UPDATE accounts SET colour = ?2, signature = ?3, in_all = ?4, notify = ?5, ai = ?6,
-                sync_days = ?7 WHERE id = ?1",
+                sync_days = ?7, sync_calendar = ?8, sync_contacts = ?9 WHERE id = ?1",
             params![
                 account.0,
                 i64::from(s.colour % ACCOUNT_COLOURS),
@@ -267,8 +283,51 @@ impl MailStore {
                 s.in_all,
                 s.notify.key(),
                 s.ai,
-                s.range.stored()
+                s.range.stored(),
+                s.calendar,
+                s.contacts
             ],
+        )?;
+        Ok(())
+    }
+
+    /// How the account's last sync went.
+    pub fn account_health(&self, account: AccountId) -> StoreResult<AccountHealth> {
+        Ok(self.conn.query_row(
+            "SELECT last_sync, needs_sign_in, last_error FROM accounts WHERE id = ?1",
+            [account.0],
+            |r| {
+                Ok(AccountHealth {
+                    last_sync: r
+                        .get::<_, Option<String>>(0)?
+                        .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
+                        .map(|t| t.with_timezone(&Utc)),
+                    needs_sign_in: r.get(1)?,
+                    last_error: r.get(2)?,
+                })
+            },
+        )?)
+    }
+
+    /// Records a successful sync.
+    pub fn record_sync_ok(&self, account: AccountId, at: DateTime<Utc>) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE accounts SET last_sync = ?2, needs_sign_in = 0, last_error = NULL WHERE id = ?1",
+            params![account.0, at.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Records a failed sync; `needs_sign_in` when the credentials stopped working.
+    pub fn record_sync_error(
+        &self,
+        account: AccountId,
+        needs_sign_in: bool,
+        message: &str,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE accounts SET needs_sign_in = ?2, last_error = ?3 WHERE id = ?1",
+            params![account.0, needs_sign_in, message],
         )?;
         Ok(())
     }
@@ -468,16 +527,42 @@ mod tests {
                 notify,
                 ai: false,
                 range,
+                calendar: false,
+                contacts: true,
             };
             s.save_account_settings(id, &settings).unwrap();
             let back = s.account_settings(id).unwrap();
             assert_eq!(back.colour, 3, "colours wrap");
             assert_eq!((back.range, back.notify), (range, notify));
-            assert!(!back.in_all && !back.ai);
+            assert!(!back.in_all && !back.ai && !back.calendar && back.contacts);
         }
         assert_eq!(
             SyncRange::ALL.map(SyncRange::label),
             ["30 days", "90 days", "1 year", "Everything"]
+        );
+    }
+
+    #[test]
+    fn sync_health_is_recorded() {
+        let (s, id) = store();
+        assert_eq!(s.account_health(id).unwrap(), AccountHealth::default());
+        s.record_sync_error(id, true, "the server rejected the sign-in")
+            .unwrap();
+        let bad = s.account_health(id).unwrap();
+        assert!(bad.needs_sign_in);
+        assert_eq!(
+            bad.last_error.as_deref(),
+            Some("the server rejected the sign-in")
+        );
+        let now = chrono::Utc::now();
+        s.record_sync_ok(id, now).unwrap();
+        let good = s.account_health(id).unwrap();
+        assert!(!good.needs_sign_in && good.last_error.is_none());
+        assert_eq!(good.last_sync.map(|t| t.timestamp()), Some(now.timestamp()));
+        s.set_preference(Pref::DefaultFrom, "1").unwrap();
+        assert_eq!(
+            s.preference(Pref::DefaultFrom).unwrap().as_deref(),
+            Some("1")
         );
     }
 

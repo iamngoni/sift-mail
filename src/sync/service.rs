@@ -14,8 +14,8 @@ use super::secrets::Refreshing;
 use super::secrets::Secrets;
 use super::send::{SendOutcome, SendRequest, send_message, write_read};
 use super::smtp::{Sender, smtp_sender};
-use super::{AddAccountRequest, add_imap_account, add_oauth_account, sync_all};
-use crate::domain::{EmailAddress, Provider};
+use super::{AddAccountRequest, add_imap_account, add_oauth_account, remove_account, sync_some};
+use crate::domain::{AccountId, EmailAddress, Provider};
 use crate::domain::{ImapSettings, ThreadRef};
 use crate::oauth::{self, OAuthConfig, OAuthError, ReqwestHttp, SignedIn};
 use crate::store::{Account, MailStore};
@@ -188,13 +188,41 @@ impl SyncService {
 
     /// Syncs every account once. Blocking; run off the UI thread.
     pub fn sync_all(&self, now: DateTime<Utc>) -> Result<SyncSummary, SyncError> {
+        self.sync_some(None, now)
+    }
+
+    /// Syncs one account. Blocking; run off the UI thread.
+    pub fn sync_account(
+        &self,
+        account: AccountId,
+        now: DateTime<Utc>,
+    ) -> Result<SyncSummary, SyncError> {
+        self.sync_some(Some(account), now)
+    }
+
+    /// Forgets an account: its local mail, attachments, settings and saved
+    /// sign-in. Mail on the server is untouched.
+    pub fn remove(&self, account: AccountId) -> Result<(), SyncError> {
+        let store = MailStore::open(&self.db_path)?;
+        if let Some(account) = store.account(account)? {
+            remove_account(&store, self.secrets.as_ref(), &account)?;
+        }
+        Ok(())
+    }
+
+    fn sync_some(
+        &self,
+        only: Option<AccountId>,
+        now: DateTime<Utc>,
+    ) -> Result<SyncSummary, SyncError> {
         let store = MailStore::open(&self.db_path)?;
         let connector = Arc::clone(&self.connector);
-        let results = sync_all(
+        let results = sync_some(
             &store,
             self.secrets.as_ref(),
             move |s: &ImapSettings, p: &str| connector(s, p),
             now,
+            only,
         )?;
         let mut summary = SyncSummary::default();
         for (account, result) in results {
@@ -202,8 +230,10 @@ impl SyncService {
                 Ok(report) => {
                     summary.ok += 1;
                     summary.stored += report.stored;
+                    store.record_sync_ok(account, now)?;
                 }
                 Err(error) => {
+                    store.record_sync_error(account, error.needs_sign_in(), &error.to_string())?;
                     let name = store
                         .account(account)
                         .ok()
@@ -342,6 +372,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sift-svc-fail-{}", std::process::id()));
         let svc = service(&dir, "pw");
         svc.add_account(request("pw")).unwrap();
+        let first = svc.sync_all(Utc::now()).unwrap();
+        assert!(first.failures.is_empty());
+        let store = MailStore::open(&dir.join("mail.db")).unwrap();
+        let id = store.accounts().unwrap()[0].id;
+        assert!(store.account_health(id).unwrap().last_sync.is_some());
         // Lose the saved password: the next sync reports it by account name.
         svc.secrets.delete("imap:you@x.com").unwrap();
         let summary = svc.sync_all(Utc::now()).unwrap();
@@ -350,6 +385,14 @@ mod tests {
             ["Mail: no password is saved for this account"]
         );
         assert!(summary.status_line().starts_with("Sync failed. Mail:"));
+        let health = store.account_health(id).unwrap();
+        assert!(health.needs_sign_in, "a missing password needs a sign-in");
+        assert!(health.last_error.is_some());
+        let one = svc.sync_account(id, Utc::now()).unwrap();
+        assert_eq!(one.failures.len(), 1, "only that account is tried");
+        svc.remove(id).unwrap();
+        svc.remove(id).unwrap();
+        assert!(store.accounts().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

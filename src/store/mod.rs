@@ -12,8 +12,8 @@ mod search;
 
 pub use files::{Attachment, safe_name};
 pub use prefs::{
-    ACCOUNT_COLOURS, AccountSettings, CustomView, CustomViewId, NotifyLevel, Pref, SyncRange,
-    describe_view,
+    ACCOUNT_COLOURS, AccountHealth, AccountSettings, CustomView, CustomViewId, NotifyLevel, Pref,
+    SyncRange, describe_view,
 };
 pub use search::{SEARCH_LIMIT, fts_query};
 

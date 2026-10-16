@@ -59,44 +59,66 @@ impl Render for SiftApp {
                         .child(message),
                 )
             })
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .when(self.sidebar, |area| area.child(self.sidebar(&p, cx)))
-                    .child(
-                        div()
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(body)
-                            .child(self.dock(&p, sift.appearance(), cx)),
-                    )
-                    .children(self.overlay_layer(&p, cx))
-                    .when(self.snoozing.is_some(), |area| {
-                        area.child(self.snooze_menu(&p, cx))
-                    })
-                    .when(self.form.is_some(), |area| {
-                        area.child(self.add_account_dialog(&p, cx))
-                    })
-                    .when(self.compose.is_some(), |area| {
-                        area.child(self.compose_dialog(&p, cx))
-                    }),
-            )
+            .when(self.settings.is_some(), |root| {
+                root.child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .child(self.settings_screen(&p, cx))
+                        .when(self.form.is_some(), |area| {
+                            area.child(self.add_account_dialog(&p, cx))
+                        }),
+                )
+            })
+            .when(self.settings.is_none(), |root| {
+                root.child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .when(self.sidebar, |area| area.child(self.sidebar(&p, cx)))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(body)
+                                .child(self.dock(&p, sift.appearance(), cx)),
+                        )
+                        .children(self.overlay_layer(&p, cx))
+                        .when(self.snoozing.is_some(), |area| {
+                            area.child(self.snooze_menu(&p, cx))
+                        })
+                        .when(self.form.is_some(), |area| {
+                            area.child(self.add_account_dialog(&p, cx))
+                        })
+                        .when(self.compose.is_some(), |area| {
+                            area.child(self.compose_dialog(&p, cx))
+                        }),
+                )
+            })
     }
 }
 
 impl SiftApp {
     fn title_bar(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut tabs: Vec<AnyElement> = TriageView::ALL
-            .into_iter()
-            .map(|view| self.tab(view, p, cx))
-            .collect();
-        tabs.extend(self.custom_tabs(p, cx));
+        let in_settings = self.settings.is_some();
+        let mut tabs: Vec<AnyElement> = if in_settings {
+            vec![self.back_to_mail_tab(p, cx)]
+        } else {
+            TriageView::ALL
+                .into_iter()
+                .map(|view| self.tab(view, p, cx))
+                .collect()
+        };
+        if !in_settings {
+            tabs.extend(self.custom_tabs(p, cx));
+        }
         TitleBar::new()
             .h(px(size::TITLE_BAR))
             .bg(p.bg)
@@ -122,7 +144,29 @@ impl SiftApp {
                     .child(div().flex().items_center().gap(px(2.0)).children(tabs)),
             )
             .child(div().flex_1())
-            .child(self.title_actions(p, cx))
+            .when(!in_settings, |bar| bar.child(self.title_actions(p, cx)))
+    }
+
+    fn back_to_mail_tab(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let hover = p.bg_hover;
+        div()
+            .id("back-to-mail")
+            .h(px(size::TAB))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(px(radius::TAB))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(p.ink_2)
+            .hover(move |s| s.bg(hover))
+            .child(Icon::new(IconName::ChevronLeft).size(px(14.0)))
+            .child("Back to mail")
+            .on_click(
+                cx.listener(|this, _: &ClickEvent, window, cx| this.close_settings(window, cx)),
+            )
+            .test_support()
+            .into_any_element()
     }
 
     fn tab(&self, view: TriageView, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -213,7 +257,11 @@ impl SiftApp {
             .id(("thread-row", index))
             .group("row")
             .relative()
-            .h(px(size::ROW))
+            .h(px(if self.compact {
+                size::ROW_COMPACT
+            } else {
+                size::ROW
+            }))
             .px(px(12.0))
             .flex()
             .items_center()

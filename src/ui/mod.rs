@@ -7,9 +7,13 @@ mod chrome;
 mod chrome_view;
 mod compose;
 mod render;
+mod settings;
+mod settings_view;
 
 #[cfg(test)]
 mod chrome_tests;
+#[cfg(test)]
+mod settings_tests;
 #[cfg(test)]
 mod tests;
 

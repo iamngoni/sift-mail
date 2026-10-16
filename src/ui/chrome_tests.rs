@@ -192,7 +192,10 @@ fn every_command_runs(cx: &mut TestAppContext) {
     }
     assert!(read(cx, &view, SiftApp::sidebar_open));
     assert!(read(cx, &view, SiftApp::summaries_on));
-    assert!(read(cx, &view, |a| a.form.is_some()));
+    assert!(
+        read(cx, &view, SiftApp::settings_open),
+        "the last command opens Settings"
+    );
     for expected in [Appearance::Light, Appearance::Dark] {
         cx.update_window(handle, |_, window, cx| {
             view.update(cx, |app, cx| {
