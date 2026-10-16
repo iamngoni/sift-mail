@@ -32,6 +32,11 @@ Try it with sample mail:
 SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
 ```
 
+## Fonts
+
+The interface uses [Geist and Geist Mono](https://github.com/vercel/geist-font),
+bundled in `assets/fonts` under the SIL Open Font License (`assets/fonts/OFL.txt`).
+
 ## Naming
 
 | Where | Name |

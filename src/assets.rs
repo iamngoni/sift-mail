@@ -76,6 +76,13 @@ const EXTRA: [(&str, &[u8]); 18] = [
     ),
 ];
 
+/// The design's typefaces, Geist and Geist Mono (SIL Open Font License,
+/// see `assets/fonts/OFL.txt`), registered with the text system at startup.
+pub const FONTS: [&[u8]; 2] = [
+    include_bytes!("../assets/fonts/Geist-Variable.ttf"),
+    include_bytes!("../assets/fonts/GeistMono-Variable.ttf"),
+];
+
 /// Sift's asset source: the extra icons, then GPUI Kit's.
 pub struct SiftAssets;
 
@@ -113,6 +120,9 @@ mod tests {
         }
         assert!(SiftAssets.load("icons/check.svg").unwrap().is_some());
         assert_eq!(SiftAssets.load("").unwrap(), None);
+        for font in FONTS {
+            assert_eq!(&font[..4], [0, 1, 0, 0], "TrueType");
+        }
         let icons = SiftAssets.list("icons/").unwrap();
         assert!(icons.iter().any(|i| i == "icons/pencil.svg"));
         assert!(icons.iter().any(|i| i == "icons/check.svg"));

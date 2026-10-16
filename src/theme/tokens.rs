@@ -170,6 +170,11 @@ pub mod radius {
     pub const CARD: f32 = 12.0;
 }
 
+/// The interface typeface, from the style spec.
+pub const FONT: &str = "Geist";
+/// The typeface for keyboard hints and other fixed-width text.
+pub const MONO_FONT: &str = "Geist Mono";
+
 /// Fixed heights, in pixels.
 pub mod size {
     /// The custom title bar.

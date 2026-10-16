@@ -49,6 +49,7 @@ impl Render for SiftApp {
             .bg(p.bg)
             .text_color(p.ink)
             .text_size(px(text::UI))
+            .font_family(crate::theme::tokens::FONT)
             .child(self.title_bar(&p, cx))
             .when_some(self.error.clone(), |root, message| {
                 root.child(
@@ -1012,6 +1013,7 @@ pub(super) fn kbd(key: &str, p: &Palette) -> impl IntoElement {
         .border_1()
         .border_color(p.line_strong)
         .text_size(px(text::SMALL))
+        .font_family(crate::theme::tokens::MONO_FONT)
         .text_color(p.ink_3)
         .child(key.to_owned())
 }

@@ -77,6 +77,9 @@ pub enum ThemeError {
     /// [`theme_set_json`] or a breaking change in GPUI Kit's theme schema.
     #[error("GPUI Kit rejected the Sift theme: {0}")]
     Schema(#[from] serde_json::Error),
+    /// The bundled typefaces could not be loaded.
+    #[error("the Sift fonts could not be loaded: {0}")]
+    Fonts(String),
     /// The generated set did not contain both appearances.
     #[error("the Sift theme set is missing {0}")]
     Missing(&'static str),
@@ -179,6 +182,8 @@ fn theme_config_json(name: &str, mode: &str, p: &Palette) -> Value {
     json!({
         "name": name,
         "mode": mode,
+        "font.family": tokens::FONT,
+        "mono_font.family": tokens::MONO_FONT,
         "font.size": tokens::text::UI,
         // GPUI Kit stores radii as whole pixels.
         "radius": tokens::radius::BUTTON.round() as u32,
@@ -208,6 +213,14 @@ pub fn theme_configs() -> Result<(ThemeConfig, ThemeConfig), ThemeError> {
 
 /// Registers the Sift themes with GPUI Kit and applies `appearance`.
 pub fn install(appearance: Appearance, cx: &mut App) -> Result<(), ThemeError> {
+    cx.text_system()
+        .add_fonts(
+            crate::assets::FONTS
+                .iter()
+                .map(|f| std::borrow::Cow::Borrowed(*f))
+                .collect(),
+        )
+        .map_err(|e| ThemeError::Fonts(e.to_string()))?;
     let (light, dark) = theme_configs()?;
     Theme::update(cx, |theme| {
         theme.light_theme = Rc::new(light);
@@ -277,6 +290,8 @@ mod tests {
         assert!(!light.mode.is_dark());
         assert!(dark.mode.is_dark());
         assert_eq!(light.font_size, Some(tokens::text::UI));
+        assert_eq!(light.font_family.as_deref(), Some(tokens::FONT));
+        assert_eq!(light.mono_font_family.as_deref(), Some(tokens::MONO_FONT));
         assert_eq!(light.radius, Some(8));
         assert_eq!(light.radius_lg, Some(12));
 
