@@ -49,6 +49,27 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
+      - name: Use Git Bash (Windows)
+        # A bare "bash" can resolve to WSL's bash.exe, which can't see the
+        # runner's Windows paths. Put Git for Windows' bash first instead.
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = Split-Path (Split-Path (Get-Command git).Source)
+          "$git\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: System libraries (Linux)
+        # GPUI links against these; install whichever the runner lacks.
+        if: runner.os == 'Linux'
+        run: |
+          pkgs="build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev"
+          missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+          if [ -n "$missing" ]; then
+            sudo=$(command -v sudo || true)
+            $sudo apt-get update -qq
+            $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing
+          fi
+
       - name: Tag matches Cargo.toml
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
