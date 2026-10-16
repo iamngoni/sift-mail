@@ -102,3 +102,7 @@ git push origin v0.1.0
 
 Builds are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
 will warn on first launch.
+
+## License
+
+[MIT](LICENSE)
