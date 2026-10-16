@@ -118,6 +118,13 @@ pub struct SiftApp {
     pub(crate) compose_draft: Option<ComposeForm>,
     /// The Calendar screen, while open.
     pub(crate) calendar: Option<super::calendar::CalendarState>,
+    /// Accounts whose sign-in banner was put off for this session.
+    pub(crate) reauth_later: Vec<AccountId>,
+    /// Shows desktop notifications; `None` keeps quiet (tests, previews).
+    pub(crate) notifier: Option<super::notify::Notifier>,
+    /// Mail held for the next check-in.
+    pub(crate) held: Vec<super::notify::Arrival>,
+    pub(crate) last_checkin: chrono::DateTime<Utc>,
 }
 
 impl SiftApp {
@@ -179,6 +186,10 @@ impl SiftApp {
             rewriting: false,
             compose_draft: None,
             calendar: None,
+            reauth_later: Vec::new(),
+            notifier: None,
+            held: Vec::new(),
+            last_checkin: Utc::now(),
         };
         app.load_preferences(window, cx);
         app.load_choices();

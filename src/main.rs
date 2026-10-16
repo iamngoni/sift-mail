@@ -31,6 +31,9 @@ fn main() {
                 .map(|path| SyncService::networked(path.to_path_buf(), Arc::new(Keychain)));
             match sift_mail::ui::open_main_window(store, sync, cx) {
                 Ok(view) => {
+                    view.update(cx, |app, _| {
+                        app.use_notifier(Some(sift_mail::ui::system_notifier()));
+                    });
                     if let Ok(screen) = std::env::var(sift_mail::ui::OPEN_ENV) {
                         sift_mail::ui::open_start_screen(&view, &screen, cx);
                     }

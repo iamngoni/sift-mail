@@ -34,6 +34,52 @@ impl MailStore {
         Ok(())
     }
 
+    /// The newest message id, or 0 for an empty store. Taken before a sync to
+    /// find what it brought.
+    pub fn latest_message_id(&self) -> StoreResult<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM messages", [], |r| {
+                r.get(0)
+            })?)
+    }
+
+    /// Unread inbox mail stored after `id` that arrived after `received_after`
+    /// (so a first sync of old mail stays quiet), oldest first: account, view,
+    /// sender and subject.
+    pub fn new_mail_since(
+        &self,
+        id: i64,
+        received_after: chrono::DateTime<Utc>,
+    ) -> StoreResult<
+        Vec<(
+            crate::domain::AccountId,
+            crate::domain::TriageView,
+            String,
+            String,
+        )>,
+    > {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT account_id, view, COALESCE(NULLIF(from_name, ''), from_email), subject
+             FROM messages WHERE id > ?1 AND received_at >= ?2 AND state = 'inbox' AND is_read = 0 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![id, received_after.timestamp()], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (account, view, from, subject) = row?;
+            let view = crate::domain::TriageView::from_key(&view)
+                .ok_or_else(|| super::StoreError::Corrupt(format!("unknown view {view:?}")))?;
+            Ok((crate::domain::AccountId(account), view, from, subject))
+        })
+        .collect()
+    }
+
     /// People whose name or address starts with `prefix` (any word of the
     /// name), most frequent senders first. An empty prefix matches nobody.
     pub fn contacts(&self, prefix: &str) -> StoreResult<Vec<Contact>> {

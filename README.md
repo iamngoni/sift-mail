@@ -4,22 +4,33 @@ A calm, fast, keyboard-first desktop email client for Windows, macOS and Linux,
 built in Rust on [GPUI Kit](https://gpui-kit.com) (Zed's GPUI plus Longbridge's
 component library).
 
-> **Status: early.** Add an account with **Add account**: sign in with
-> Microsoft 365 or Google in your browser (see [Sign-in setup](#sign-in-setup)),
-> or a password for iCloud, Fastmail or any IMAP server (server settings are
-> filled in and editable). Choose a name, colour and how far back to sync, then
-> watch the first sync. New mail is checked every 3 minutes.
-> Passwords and sign-in tokens live in the OS credential store. Reply from any
-> thread or write a new message; mail goes out over SMTP with proper threading
-> headers and a copy is saved to your server's Sent folder. Reading a thread
-> marks it read on the server too. The inbox has views, custom views you
-> describe, day sections, a sidebar with every account, full-text search and
-> commands in one palette (Ctrl K), bulk selection, attachments that open in
-> your usual apps, and Done, Snooze, read/unread and Undo from the keyboard. Try it with sample mail:
->
-> ```sh
-> SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
-> ```
+> **Status: feature-complete preview.** Not yet code-signed or tested against
+> every provider in the wild.
+
+- **Onboarding**: a short welcome that connects your first account and sets up
+  views, AI helpers, notifications, theme and keyboard habits.
+- **Accounts**: Microsoft 365 or Google in your browser (see
+  [Sign-in setup](#sign-in-setup)), or a password for iCloud, Fastmail or any
+  IMAP server with editable server settings. Name, colour, sync range, AI and
+  notifications per account; passwords and tokens live in the OS credential store.
+- **Inbox**: mail sorted into Needs you, Meetings, Updates, Newsletters and
+  Other; custom views you describe in words; All inboxes or one account; a
+  sidebar; day sections; Done, Snooze, read/unread and Undo from the keyboard;
+  bulk selection; full-text search and commands in one palette (`Ctrl K`).
+- **Reading and writing**: threads with collapsed history, attachments that open
+  in your usual apps, replies and new mail over SMTP with proper threading and a
+  Sent copy, recipient suggestions, and drafts kept when you close them.
+- **AI** through the Claude Code or Codex you already use (no API keys):
+  summaries, to-dos, reply drafts, tone rewrites, Ask your inbox, Write it.
+- **Calendar** from standard invitations: RSVP from the inbox, a week view,
+  quick events, Find a time, and invites sent from your own account.
+- **Focus**: hold notifications so only Needs you interrupts, with check-ins.
+
+Try it with sample mail:
+
+```sh
+SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
+```
 
 ## Naming
 
@@ -88,6 +99,7 @@ src/
     onboarding_view.rs  how onboarding looks
     calendar.rs  the Calendar and answering invitations
     calendar_view.rs  the week grid, popovers and side panel
+    notify.rs    desktop notifications that respect Focus and check-ins
     settings.rs  Settings: accounts (name, colour, send-as, signature, sync, AI, notifications,
                  connection, removal), default From, appearance, notifications, keyboard
     settings_view.rs  how Settings looks

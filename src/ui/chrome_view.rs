@@ -862,6 +862,74 @@ impl SiftApp {
         )
     }
 
+    /// What holding notifications means, with your check-in times.
+    pub(super) fn hold_line(&self) -> String {
+        let times = self.checkins.times();
+        match times.as_slice() {
+            [] => "Only Needs you can alert you. Everything else waits until you open Sift."
+                .to_owned(),
+            [one] => format!(
+                "Only Needs you can alert you. Everything else waits for your check-in at {one}."
+            ),
+            [rest @ .., last] => format!(
+                "Only Needs you can alert you. Everything else waits for your next check-in at {} and {last}.",
+                rest.join(", ")
+            ),
+        }
+    }
+
+    /// "Personal stopped syncing…" above the list when an account needs a sign-in.
+    pub(super) fn reauth_banner(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let account = self.accounts.iter().find(|a| {
+            !self.reauth_later.contains(&a.id)
+                && self
+                    .store
+                    .account_health(a.id)
+                    .is_ok_and(|h| h.needs_sign_in)
+        })?;
+        let id = account.id;
+        let provider = match account.provider {
+            crate::domain::Provider::Microsoft365 => "Microsoft",
+            crate::domain::Provider::Google => "Google",
+            crate::domain::Provider::ICloud => "iCloud",
+            crate::domain::Provider::Imap => "Your mail server",
+        };
+        Some(
+            div()
+                .mb(px(8.0))
+                .px(px(14.0))
+                .py(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .rounded(px(radius::CARD))
+                .border_1()
+                .border_color(p.warn_line)
+                .bg(p.warn_soft)
+                .child(div().flex_1().min_w_0().text_color(p.warn).child(format!(
+                    "{} stopped syncing. {provider} needs you to sign in again before new mail can arrive.",
+                    account.name
+                )))
+                .child(
+                    small_button("reauth-now", "Sign in".into(), p)
+                        .bg(p.primary)
+                        .border_color(p.primary)
+                        .text_color(p.primary_ink)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.sign_in_again(id, window, cx)))
+                        .test_support(),
+                )
+                .child(
+                    small_button("reauth-later", "Later".into(), p)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.reauth_later.push(id);
+                            cx.notify();
+                        }))
+                        .test_support(),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// The open dialog or popover, if any.
     pub(super) fn overlay_layer(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let overlay = self.overlay.as_ref()?;
@@ -1301,10 +1369,17 @@ impl SiftApp {
                             .flex()
                             .flex_col()
                             .gap(px(4.0))
-                            .child(div().font_weight(FontWeight::SEMIBOLD).child("Hold notifications"))
-                            .child(div().text_size(px(text::META)).text_color(p.ink_3).child(
-                                "Only Needs you can alert you. Everything else waits for your next check-in at 12:00 and 17:00.",
-                            )),
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Hold notifications"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(text::META))
+                                    .text_color(p.ink_3)
+                                    .child(self.hold_line()),
+                            ),
                     )
                     .child(
                         div()
@@ -1318,7 +1393,9 @@ impl SiftApp {
                             .rounded_full()
                             .bg(if on { p.accent } else { p.line_strong })
                             .child(div().size(px(16.0)).rounded_full().bg(p.bg))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_hold(cx)))
+                            .on_click(
+                                cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_hold(cx)),
+                            )
                             .test_support(),
                     ),
             )

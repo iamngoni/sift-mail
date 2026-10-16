@@ -290,6 +290,7 @@ impl SiftApp {
             .px(px(24.0))
             .flex()
             .flex_col()
+            .children(self.reauth_banner(p, cx))
             .child(self.subbar(p, cx))
             .child(div().border_t_1().border_color(p.line).children(rows))
             .when(self.threads.is_empty(), |c| c.child(self.empty_state(p)))
@@ -394,7 +395,11 @@ impl SiftApp {
                     ),
             )
             .when(thread.has_attachments, |row| {
-                row.child(Icon::new(IconName::File).size(px(14.0)).text_color(p.ink_3))
+                row.child(
+                    Icon::new(Lucide::Paperclip)
+                        .size(px(14.0))
+                        .text_color(p.ink_3),
+                )
             })
             .children(self.row_rsvp(thread, index, p, cx))
             .child(
