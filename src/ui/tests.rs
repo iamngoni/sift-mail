@@ -19,7 +19,7 @@ fn open(cx: &mut TestAppContext, seeded: bool) -> (AnyWindowHandle, Entity<SiftA
         if seeded {
             demo::seed(&store, Utc::now()).unwrap();
         }
-        let view = open_main_window(Rc::new(store), cx).unwrap();
+        let view = open_main_window(Rc::new(store), None, cx).unwrap();
         let handle = *cx.windows().first().unwrap();
         (handle, view)
     })
@@ -269,4 +269,172 @@ fn inbox_zero_after_clearing_a_view(cx: &mut TestAppContext) {
 fn default_store_opens() {
     let store = super::open_default_store().unwrap();
     assert!(store.accounts().is_ok());
+}
+
+// ---------- accounts and sync ----------
+
+mod sync_ui {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::sync::imap::{MailSession, MailboxInfo, RawMessage, SyncError};
+    use crate::sync::secrets::MemorySecrets;
+    use crate::sync::service::{BoxedSession, Connector, SyncService};
+
+    struct Inbox;
+
+    impl MailSession for Inbox {
+        fn examine_inbox(&mut self) -> Result<MailboxInfo, SyncError> {
+            Ok(MailboxInfo {
+                uid_validity: Some(1),
+            })
+        }
+        fn uid_search(&mut self, _: &str) -> Result<Vec<u32>, SyncError> {
+            Ok(vec![1])
+        }
+        fn uid_fetch(&mut self, _: &[u32]) -> Result<Vec<RawMessage>, SyncError> {
+            Ok(vec![RawMessage {
+                uid: 1,
+                seen: false,
+                internal_date: None,
+                body: b"From: Lena <lena@fastmail.com>\r\nTo: you@fastmail.com\r\nSubject: Hello from IMAP\r\nMessage-ID: <h@x>\r\n\r\nHi!\r\n".to_vec(),
+            }])
+        }
+    }
+
+    fn temp_db(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sift-ui-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join("mail.db")
+    }
+
+    fn open_synced(
+        cx: &mut TestAppContext,
+        db: &std::path::Path,
+    ) -> (AnyWindowHandle, Entity<SiftApp>) {
+        let connector: Connector = Arc::new(|_, password: &str| {
+            if password == "right" {
+                Ok(Box::new(Inbox) as BoxedSession)
+            } else {
+                Err(SyncError::Auth)
+            }
+        });
+        let service = SyncService::new(
+            db.to_path_buf(),
+            Arc::new(MemorySecrets::default()),
+            connector,
+        );
+        let db = db.to_path_buf();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            let store = MailStore::open(&db).unwrap();
+            let view = open_main_window(Rc::new(store), Some(service), cx).unwrap();
+            let handle = *cx.windows().first().unwrap();
+            (handle, view)
+        })
+    }
+
+    fn fill(
+        cx: &mut TestAppContext,
+        handle: AnyWindowHandle,
+        view: &Entity<SiftApp>,
+        email: &str,
+        password: &str,
+        server: &str,
+    ) {
+        let view = view.clone();
+        cx.update_window(handle, |_, window, cx| {
+            let (e, p, s) = view.read_with(cx, |app, _| {
+                let f = app.form.as_ref().unwrap();
+                (f.email.clone(), f.password.clone(), f.server.clone())
+            });
+            e.update(cx, |state, cx| {
+                state.set_value(email.to_owned(), window, cx)
+            });
+            p.update(cx, |state, cx| {
+                state.set_value(password.to_owned(), window, cx)
+            });
+            s.update(cx, |state, cx| {
+                state.set_value(server.to_owned(), window, cx)
+            });
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn adding_an_imap_account_fetches_its_mail(cx: &mut TestAppContext) {
+        let db = temp_db("add");
+        let (handle, view) = open_synced(cx, &db);
+        cx.run_until_parked();
+        assert_eq!(
+            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
+            Some("Up to date".into())
+        );
+
+        click(cx, handle, "add-account");
+        assert!(read(cx, &view, SiftApp::is_adding_account));
+        // Typing in the dialog must not trigger inbox shortcuts.
+        press(cx, handle, &["e", "3"]);
+        assert_eq!(read(cx, &view, SiftApp::view), TriageView::All);
+
+        fill(cx, handle, &view, "you@company.com", "right", "");
+        click(cx, handle, "connect");
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("browser sign-in"))));
+
+        fill(cx, handle, &view, "you@fastmail.com", "wrong", "");
+        click(cx, handle, "connect");
+        cx.run_until_parked();
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("rejected the sign-in"))));
+
+        fill(cx, handle, &view, "you@fastmail.com", "right", "");
+        click(cx, handle, "connect");
+        cx.run_until_parked();
+        assert!(!read(cx, &view, SiftApp::is_adding_account));
+        assert_eq!(
+            read(cx, &view, SiftApp::listed_subjects),
+            ["Hello from IMAP"]
+        );
+        assert_eq!(
+            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
+            Some("Synced · 1 new".into())
+        );
+
+        click(cx, handle, "sync-now");
+        cx.run_until_parked();
+        assert_eq!(
+            read(cx, &view, |a| a.sync_status().map(str::to_owned)),
+            Some("Up to date".into())
+        );
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn the_dialog_closes_with_cancel_or_escape(cx: &mut TestAppContext) {
+        let db = temp_db("cancel");
+        let (handle, view) = open_synced(cx, &db);
+        click(cx, handle, "add-account");
+        click(cx, handle, "cancel-add");
+        assert!(!read(cx, &view, SiftApp::is_adding_account));
+        click(cx, handle, "add-account");
+        press(cx, handle, &["escape"]);
+        assert!(!read(cx, &view, SiftApp::is_adding_account));
+        let _ = std::fs::remove_dir_all(db.parent().unwrap());
+    }
+
+    #[gpui_kit::test]
+    fn without_a_sync_service_accounts_cannot_be_saved(cx: &mut TestAppContext) {
+        let (handle, view) = open(cx, false);
+        assert!(read(cx, &view, |a| a.sync_status().is_none() && !a.is_syncing()));
+        click(cx, handle, "add-account");
+        fill(cx, handle, &view, "you@fastmail.com", "right", "");
+        click(cx, handle, "connect");
+        assert!(read(cx, &view, |a| a
+            .form_error()
+            .is_some_and(|e| e.contains("can't save"))));
+    }
 }

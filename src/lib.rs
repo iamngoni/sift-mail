@@ -7,5 +7,6 @@
 pub mod brand;
 pub mod domain;
 pub mod store;
+pub mod sync;
 pub mod theme;
 pub mod ui;

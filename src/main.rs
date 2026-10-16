@@ -5,6 +5,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::rc::Rc;
+use std::sync::Arc;
+
+use sift_mail::sync::secrets::Keychain;
+use sift_mail::sync::service::SyncService;
 
 fn main() {
     let store = match sift_mail::ui::open_default_store() {
@@ -22,7 +26,10 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             sift_mail::ui::quit_when_last_window_closes(cx);
-            if let Err(error) = sift_mail::ui::open_main_window(store, cx) {
+            let sync = store
+                .path()
+                .map(|path| SyncService::networked(path.to_path_buf(), Arc::new(Keychain)));
+            if let Err(error) = sift_mail::ui::open_main_window(store, sync, cx) {
                 eprintln!(
                     "{}: could not open the main window: {error:#}",
                     sift_mail::brand::PRODUCT_NAME

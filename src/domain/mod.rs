@@ -4,6 +4,7 @@
 pub mod email;
 pub mod message;
 pub mod provider;
+pub mod server;
 pub mod time;
 pub mod triage;
 pub mod view;
@@ -13,4 +14,5 @@ pub use message::{
     AccountId, Contact, IncomingMessage, MessageId, Signals, ThreadRef, TriageState,
 };
 pub use provider::{Provider, SignIn};
+pub use server::{Host, HostError, ImapSettings, SyncCursor};
 pub use view::TriageView;

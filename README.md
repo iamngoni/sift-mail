@@ -4,10 +4,13 @@ A calm, fast, keyboard-first desktop email client for Windows, macOS and Linux,
 built in Rust on [GPUI Kit](https://gpui-kit.com) (Zed's GPUI plus Longbridge's
 component library).
 
-> **Status: early.** The inbox works end to end against a local SQLite store:
-> views, day sections, reading threads, Done, Snooze, read/unread and Undo, all
-> from the keyboard. Account sync (IMAP, then Microsoft 365 and Google) is next,
-> so a normal build starts empty. Try it with sample mail:
+> **Status: early.** IMAP accounts work: add one with **Add account** (iCloud,
+> Fastmail, Gmail with an app password, or any IMAP server) and Sift fetches
+> the last 90 days of your INBOX, then checks for new mail every 3 minutes.
+> Passwords live in the OS credential store. The inbox supports views, day
+> sections, reading threads, Done, Snooze, read/unread and Undo from the
+> keyboard. Sync is one-way for now (Sift never changes anything on the
+> server). Microsoft 365 and Google sign-in are next. Try it with sample mail:
 >
 > ```sh
 > SIFT_MAIL_DB=/tmp/sift-demo.db cargo run --features demo
@@ -42,12 +45,18 @@ src/
     provider.rs  provider detection and sign-in method
     view.rs      the inbox views shown as tabs
   store/
-    mod.rs       SQLite mail store: threads, counts, triage actions, undo
+    mod.rs       SQLite mail store: threads, counts, triage actions, undo, IMAP cursors
     schema.rs    migrations (PRAGMA user_version)
     demo.rs      sample mail, only with --features demo and in tests
+  sync/
+    parse.rs     raw RFC 5322 mail to messages: threading, triage signals, HTML to text
+    imap.rs      IMAP over TLS: incremental UID sync, UIDVALIDITY resets
+    secrets.rs   passwords in the OS credential store
+    service.rs   background sync with its own database connection
   ui/
     mod.rs       window options, opening the store and the main window
     app.rs       inbox state and actions, keyboard handling
+    accounts.rs  Add account dialog, background sync and status
     render.rs    title bar, list, reader, snooze menu, toasts
 ```
 

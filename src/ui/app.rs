@@ -13,6 +13,9 @@ use gpui_kit::{Context, FocusHandle, KeyDownEvent, Window};
 use crate::domain::time::{SnoozeOption, snooze_options};
 use crate::domain::{ThreadRef, TriageState, TriageView};
 use crate::store::{MailStore, MessageDetail, ThreadQuery, ThreadSummary, ViewCounts};
+use crate::sync::service::SyncService;
+
+use super::accounts::AddAccountForm;
 
 /// The thread currently open in the reader.
 pub(crate) struct OpenThread {
@@ -41,11 +44,23 @@ pub struct SiftApp {
     pub(crate) snoozing: Option<(Vec<ThreadRef>, Vec<SnoozeOption>)>,
     pub(crate) toast: Option<Toast>,
     pub(crate) error: Option<String>,
+    /// Background sync, or `None` when the store has no file (tests, previews).
+    pub(crate) sync: Option<SyncService>,
+    pub(crate) syncing: bool,
+    pub(crate) sync_status: Option<String>,
+    /// The Add account dialog, while open.
+    pub(crate) form: Option<AddAccountForm>,
 }
 
 impl SiftApp {
-    /// Builds the view over `store` and gives it keyboard focus.
-    pub fn new(store: Rc<MailStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Builds the view over `store`, gives it keyboard focus, and starts
+    /// background sync when `sync` is given.
+    pub fn new(
+        store: Rc<MailStore>,
+        sync: Option<SyncService>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let mut app = Self {
@@ -60,8 +75,13 @@ impl SiftApp {
             snoozing: None,
             toast: None,
             error: None,
+            sync,
+            syncing: false,
+            sync_status: None,
+            form: None,
         };
         app.reload();
+        app.schedule_sync(cx);
         app
     }
 
@@ -303,6 +323,14 @@ impl SiftApp {
         }
         let key = keystroke.key.as_str();
         let digit = key.parse::<u8>().ok();
+        if self.form.is_some() {
+            // Typing goes to the dialog's inputs; only Escape is ours.
+            if key == "escape" {
+                self.close_add_account(cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
         if self.snoozing.is_some() {
             match (key, digit) {
                 ("escape", _) => self.cancel_snooze(cx),
