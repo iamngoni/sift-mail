@@ -6834,6 +6834,7 @@ dependencies = [
  "keyring",
  "lettre",
  "mail-parser",
+ "notify-rust",
  "open",
  "reqwest",
  "rusqlite",

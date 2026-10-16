@@ -13,6 +13,7 @@ mod chrome;
 mod chrome_view;
 mod compose;
 mod compose_form;
+mod notify;
 mod onboarding;
 mod onboarding_view;
 mod render;
@@ -136,3 +137,5 @@ pub fn open_start_screen(view: &gpui_kit::Entity<SiftApp>, screen: &str, cx: &mu
         });
     });
 }
+
+pub use notify::{Notifier, system_notifier};

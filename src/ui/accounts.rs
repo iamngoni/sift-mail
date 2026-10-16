@@ -69,6 +69,7 @@ impl SiftApp {
         }
         self.syncing = true;
         self.sync_status = Some("Syncing…".to_owned());
+        let since = self.store.latest_message_id().unwrap_or(i64::MAX);
         cx.notify();
         let task = cx
             .background_executor()
@@ -82,6 +83,8 @@ impl SiftApp {
                     Err(error) => format!("Sync failed: {error}"),
                 });
                 app.reload();
+                app.notify_new_mail(since);
+                app.check_in(Utc::now(), cx);
                 cx.notify();
             })
         })

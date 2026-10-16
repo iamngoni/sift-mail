@@ -490,7 +490,7 @@ impl SiftApp {
             .child(div().h(px(16.0)))
             .child(row(
                 "Hold notifications",
-                Some("Only Needs you can alert you. Everything else waits for your next check-in at 12:00 and 17:00.".into()),
+                Some(self.hold_line().into()),
                 switch("settings-hold", self.hold, p)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.toggle_hold(cx)))
                     .test_support()

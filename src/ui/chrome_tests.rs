@@ -407,3 +407,101 @@ fn a_start_screen_can_be_named(cx: &mut TestAppContext) {
     cx.update(|cx| super::open_start_screen(&view, "settings", cx));
     assert!(read(cx, &view, SiftApp::settings_open));
 }
+
+#[gpui_kit::test]
+fn sign_in_problems_show_above_the_list(cx: &mut TestAppContext) {
+    let (handle, view) = open(cx, true);
+    let work = read(cx, &view, |a| a.accounts[0].id);
+    view.read_with(cx, |a, _| {
+        a.store
+            .record_sync_error(work, true, "the server rejected the sign-in")
+            .unwrap();
+    });
+    click(cx, handle, "filter-all");
+    click(cx, handle, "reauth-later");
+    assert_eq!(read(cx, &view, |a| a.reauth_later.clone()), [work]);
+    view.update(cx, |app, _| app.reauth_later.clear());
+    click(cx, handle, "filter-all");
+    click(cx, handle, "reauth-now");
+    assert!(read(cx, &view, |a| a.form.is_some()));
+}
+
+#[gpui_kit::test]
+fn new_mail_notifies_as_focus_allows(cx: &mut TestAppContext) {
+    use std::sync::{Arc, Mutex};
+    let (_, view) = open(cx, false);
+    let shown: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = Arc::clone(&shown);
+    let account = view.update(cx, |app, _| {
+        app.use_notifier(Some(Arc::new(move |title: &str, _: &str| {
+            sink.lock().unwrap().push(title.to_owned());
+        })));
+        app.store
+            .add_account(
+                "Work",
+                &EmailAddress::parse("you@company.com").unwrap(),
+                Provider::Imap,
+            )
+            .unwrap()
+            .id
+    });
+    let since = read(cx, &view, |a| a.store.latest_message_id().unwrap());
+    for (n, (from, subject, to_me)) in [
+        ("Priya", "Can you send the Q4 numbers?", true),
+        ("Product Weekly", "Issue 113", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        view.read_with(cx, |a, _| {
+            a.store
+                .upsert(&IncomingMessage {
+                    account,
+                    remote_id: format!("n{n}"),
+                    thread_key: format!("n{n}"),
+                    from: Contact::new(Some(from), EmailAddress::parse("x@company.com").unwrap()),
+                    subject: subject.into(),
+                    body_text: "Please reply by Monday?".into(),
+                    received_at: Utc::now(),
+                    is_read: false,
+                    has_attachments: false,
+                    signals: Signals {
+                        mailing_list: !to_me,
+                        addressed_to_me: to_me,
+                        ..Signals::default()
+                    },
+                    message_id: None,
+                    references: Vec::new(),
+                })
+                .unwrap();
+        });
+    }
+    view.update(cx, |app, cx| {
+        app.update_account(account, cx, |s| {
+            s.notify = crate::store::NotifyLevel::Everything
+        });
+        app.notify_new_mail(since);
+    });
+    assert_eq!(
+        *shown.lock().unwrap(),
+        ["Priya"],
+        "only Needs you gets through"
+    );
+    assert_eq!(read(cx, &view, |a| a.held.len()), 1);
+    view.update(cx, |app, cx| {
+        app.last_checkin = Utc::now() - chrono::Duration::days(1);
+        app.check_in(Utc::now(), cx);
+    });
+    assert_eq!(
+        shown.lock().unwrap().len(),
+        2,
+        "the check-in summarises the rest"
+    );
+    assert!(read(cx, &view, |a| a.held.is_empty()));
+    view.update(cx, |app, cx| {
+        app.set_notify_mode(crate::domain::choices::NotifyMode::Never, cx);
+        app.notify_new_mail(0);
+        app.check_in(Utc::now(), cx);
+    });
+    assert_eq!(shown.lock().unwrap().len(), 2);
+}
