@@ -48,7 +48,8 @@ jobs:
         shell: powershell
         run: |
           $git = Split-Path (Split-Path (Get-Command git).Source)
-          "$git\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          # Windows PowerShell's utf8 adds a BOM, which would spoil the path.
+          [IO.File]::AppendAllText($env:GITHUB_PATH, "$git\bin`n")
 
       - name: System libraries (Linux)
         # GPUI links against these; install whichever the runner lacks.
@@ -93,7 +94,8 @@ jobs:
         shell: powershell
         run: |
           $git = Split-Path (Split-Path (Get-Command git).Source)
-          "$git\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          # Windows PowerShell's utf8 adds a BOM, which would spoil the path.
+          [IO.File]::AppendAllText($env:GITHUB_PATH, "$git\bin`n")
 
       - name: System libraries (Linux)
         # GPUI links against these; install whichever the runner lacks.
