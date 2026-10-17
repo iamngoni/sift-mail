@@ -387,7 +387,9 @@ fn find_a_time_holds_and_releases(cx: &mut TestAppContext) {
 fn meetings_with_links_can_be_joined(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, true);
     let account = read(cx, &view, |a| a.accounts[0].id);
-    let start = Utc::now() + Duration::days(7);
+    // A weekday next week: the grid shows Monday to Friday.
+    let day = crate::domain::schedule::work_week(chrono::Local::now().date_naive(), 1)[2];
+    let start = super::calendar::utc(day.and_hms_opt(10, 0, 0).unwrap());
     view.read_with(cx, |a, _| {
         a.store
             .apply_invite(
@@ -590,8 +592,11 @@ fn find_a_time_asks_the_provider_when_it_can(cx: &mut TestAppContext) {
     });
     if !search.people.is_empty() {
         assert!(
-            matches!(search.others, super::calendar::Others::Failed(_)),
-            "a password account can't see other calendars: {:?}",
+            matches!(
+                &search.others,
+                super::calendar::Others::Failed(why) if !why.contains("server returned")
+            ),
+            "a password account can't see other calendars, said plainly: {:?}",
             search.others
         );
     }
