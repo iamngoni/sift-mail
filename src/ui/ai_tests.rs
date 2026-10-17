@@ -163,7 +163,7 @@ fn summaries_replace_previews_in_the_list(cx: &mut TestAppContext) {
 fn ask_your_inbox_answers_with_a_source(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, true);
     with_fake(cx, &view);
-    press(cx, handle, &["ctrl-k"]);
+    press(cx, handle, &["secondary-k"]);
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.input("What does Tom need?", cx);
@@ -259,7 +259,7 @@ fn failures_are_explained_and_can_be_retried(cx: &mut TestAppContext) {
     );
 
     press(cx, handle, &["escape", "escape"]);
-    press(cx, handle, &["ctrl-k"]);
+    press(cx, handle, &["secondary-k"]);
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.input("Who is Kofi?", cx);
@@ -328,7 +328,7 @@ fn ai_stays_out_where_it_is_switched_off(cx: &mut TestAppContext) {
 fn the_ai_settings_page_picks_the_assistant(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, true);
     with_fake(cx, &view);
-    press(cx, handle, &["ctrl-,"]);
+    press(cx, handle, &["secondary-,"]);
     click(cx, handle, ("settings-nav", 2usize));
     assert_eq!(
         read(cx, &view, SiftApp::settings_page),

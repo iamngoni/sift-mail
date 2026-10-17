@@ -66,7 +66,7 @@ fn settings_opens_from_the_account_menu_and_closes(cx: &mut TestAppContext) {
     click(cx, handle, ("account-card", 0usize));
     click(cx, handle, "back-to-mail");
     assert!(!read(cx, &view, SiftApp::settings_open));
-    press(cx, handle, &["ctrl-,"]);
+    press(cx, handle, &["secondary-,"]);
     assert_eq!(
         read(cx, &view, SiftApp::settings_page),
         Some(SettingsPage::General)
@@ -327,7 +327,7 @@ fn sync_now_runs_for_one_account(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_other_pages(cx: &mut TestAppContext) {
     let (handle, view) = open(cx, true);
-    press(cx, handle, &["ctrl-,"]);
+    press(cx, handle, &["secondary-,"]);
     for (i, page) in SettingsPage::ALL.into_iter().enumerate() {
         click(cx, handle, ("settings-nav", i));
         assert_eq!(read(cx, &view, SiftApp::settings_page), Some(page));
