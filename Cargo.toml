@@ -87,7 +87,8 @@ icons = [
 allow-downgrades = false
 
 [package.metadata.packager.nsis]
-install-mode = "currentUser"
+installer-mode = "currentUser"
+installer-icon = "assets/app-icon/SiftMail.ico"
 
 [package.metadata.packager.macos]
 minimum-system-version = "12.0"
