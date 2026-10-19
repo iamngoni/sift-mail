@@ -179,17 +179,26 @@ Sift then talks to the normal IMAP and SMTP servers with XOAUTH2.
 
 **Microsoft 365 / Outlook.com** (Microsoft Entra admin center → App registrations → New registration):
 
-1. Supported account types: *Accounts in any organizational directory and personal Microsoft accounts*.
+1. Supported account types: *Accounts in any organizational directory and personal
+   Microsoft accounts*, or *this organizational directory only* for a registration
+   just for your own organisation (then set `SIFT_MS_TENANT`, below).
 2. Platform: *Mobile and desktop applications*, redirect URI `http://127.0.0.1/callback`
    (the port is chosen at run time; Entra ignores it for loopback addresses).
-3. API permissions → Add → *APIs my organization uses* → **Office 365 Exchange Online**:
-   `IMAP.AccessAsUser.All`, `SMTP.Send`; plus Microsoft Graph `offline_access`, `openid`, `email`, `profile`
-   and `Calendars.Read.Shared` (for Find a time).
-4. Build with the Application (client) ID:
+3. Permissions need no portal setup: Sift asks for them at sign-in
+   (`https://outlook.office.com/IMAP.AccessAsUser.All`, `https://outlook.office.com/SMTP.Send`,
+   `offline_access`, `openid`, `email`, `profile`, and Graph `Calendars.Read.Shared`
+   for Find a time). The `*AsApp` permissions in the portal are for background
+   services and aren't used.
+4. Give Sift the Application (client) ID, built in or set when it runs:
 
 ```sh
 SIFT_MS_CLIENT_ID=00000000-0000-0000-0000-000000000000 cargo build --release
 ```
+
+A registration for one organisation only must sign in through that
+organisation: also set `SIFT_MS_TENANT` to its tenant ID or domain (for example
+`contoso.com`). Without it Sift uses Microsoft's shared `common` sign-in, which
+Microsoft refuses for single-organisation apps (`AADSTS50194`).
 
 Organisations that only allow approved apps will show Sift's *needs approval*
 screen, which offers a ready-made request for the IT team (they approve it under

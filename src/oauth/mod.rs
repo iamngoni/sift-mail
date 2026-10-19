@@ -80,6 +80,9 @@ pub struct OAuthConfig {
 
 /// Environment variable for the Microsoft client ID.
 pub const MS_CLIENT_ID: &str = "SIFT_MS_CLIENT_ID";
+/// Environment variable for the Microsoft tenant: a tenant ID or domain, for
+/// an app registered for one organisation only. Unset means `common`.
+pub const MS_TENANT: &str = "SIFT_MS_TENANT";
 /// Environment variable for the Google client ID.
 pub const GOOGLE_CLIENT_ID: &str = "SIFT_GOOGLE_CLIENT_ID";
 /// Environment variable for the Google installed-app secret.
@@ -98,6 +101,7 @@ impl OAuthConfig {
     pub fn for_provider(provider: Provider) -> Result<Self, OAuthError> {
         Self::for_provider_with(provider, &|name| match name {
             MS_CLIENT_ID => setting(name, option_env!("SIFT_MS_CLIENT_ID")),
+            MS_TENANT => setting(name, option_env!("SIFT_MS_TENANT")),
             GOOGLE_CLIENT_ID => setting(name, option_env!("SIFT_GOOGLE_CLIENT_ID")),
             GOOGLE_CLIENT_SECRET => setting(name, option_env!("SIFT_GOOGLE_CLIENT_SECRET")),
             _ => None,
@@ -110,22 +114,10 @@ impl OAuthConfig {
         settings: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self, OAuthError> {
         match provider {
-            Provider::Microsoft365 => Ok(Self {
-                provider,
-                authorize_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-                    .into(),
-                token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
-                client_id: settings(MS_CLIENT_ID).ok_or(OAuthError::NotConfigured {
-                    provider: "Microsoft",
-                    variable: MS_CLIENT_ID,
-                })?,
-                client_secret: None,
-                scopes: "offline_access openid email profile \
-                         https://outlook.office.com/IMAP.AccessAsUser.All \
-                         https://outlook.office.com/SMTP.Send"
-                    .into(),
-                consent_only: crate::sync::freebusy::GRAPH_SCOPE.into(),
-            }),
+            Provider::Microsoft365 => {
+                let tenant = ms_tenant(settings(MS_TENANT))?;
+                Self::microsoft(provider, &tenant, settings)
+            }
             Provider::Google => Ok(Self {
                 provider,
                 authorize_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
@@ -145,6 +137,49 @@ impl OAuthConfig {
                 "this provider signs in with a password".into(),
             )),
         }
+    }
+
+    /// Microsoft 365, signing in through `tenant`.
+    fn microsoft(
+        provider: Provider,
+        tenant: &str,
+        settings: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self, OAuthError> {
+        Ok(Self {
+            provider,
+            authorize_url: format!(
+                "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
+            ),
+            token_url: format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"),
+            client_id: settings(MS_CLIENT_ID).ok_or(OAuthError::NotConfigured {
+                provider: "Microsoft",
+                variable: MS_CLIENT_ID,
+            })?,
+            client_secret: None,
+            scopes: "offline_access openid email profile \
+                         https://outlook.office.com/IMAP.AccessAsUser.All \
+                         https://outlook.office.com/SMTP.Send"
+                .into(),
+            consent_only: crate::sync::freebusy::GRAPH_SCOPE.into(),
+        })
+    }
+}
+
+/// The Microsoft tenant to sign in through: `common` unless one is set. It
+/// goes into the sign-in URL, so only a tenant ID or domain is accepted.
+fn ms_tenant(set: Option<String>) -> Result<String, OAuthError> {
+    let Some(tenant) = set.map(|t| t.trim().to_owned()) else {
+        return Ok("common".into());
+    };
+    if tenant
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    {
+        Ok(tenant)
+    } else {
+        Err(OAuthError::Provider(format!(
+            "{MS_TENANT} should be a tenant ID or domain, like contoso.com"
+        )))
     }
 }
 
