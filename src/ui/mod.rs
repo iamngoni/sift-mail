@@ -82,12 +82,23 @@ pub const DB_PATH_ENV: &str = "SIFT_MAIL_DB";
 /// the `demo` feature, an empty store is filled with sample mail so the inbox
 /// can be tried without an account.
 pub fn open_default_store() -> StoreResult<MailStore> {
-    let path = std::env::var_os(DB_PATH_ENV)
+    open_store_at(&store_path(std::env::var_os(DB_PATH_ENV)))
+}
+
+/// Where the store lives: `overridden` (the `SIFT_MAIL_DB` value) if it's set
+/// and not empty, else the per-user default.
+pub fn store_path(overridden: Option<std::ffi::OsString>) -> std::path::PathBuf {
+    overridden
         .filter(|p| !p.is_empty())
         .map(std::path::PathBuf::from)
         .or_else(MailStore::default_path)
-        .unwrap_or_else(|| "sift-mail.db".into());
-    let store = MailStore::open(&path)?;
+        .unwrap_or_else(|| "sift-mail.db".into())
+}
+
+/// Opens the store at `path`; with the `demo` feature, fills an empty one with
+/// sample mail.
+pub fn open_store_at(path: &std::path::Path) -> StoreResult<MailStore> {
+    let store = MailStore::open(path)?;
     #[cfg(feature = "demo")]
     crate::store::demo::seed(&store, chrono::Utc::now())?;
     Ok(store)

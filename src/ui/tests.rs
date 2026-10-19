@@ -282,9 +282,21 @@ fn inbox_zero_after_clearing_a_view(cx: &mut TestAppContext) {
 }
 
 #[test]
-fn default_store_opens() {
-    let store = super::open_default_store().unwrap();
+fn the_store_path_and_opening_never_touch_real_mail() {
+    // Tests must not open the real store: with the demo feature on, opening
+    // fills it with sample mail.
+    let default = super::store_path(None);
+    assert!(default.ends_with(std::path::Path::new("Sift Mail").join("mail.db")));
+    assert_eq!(super::store_path(Some("".into())), default);
+    assert_eq!(
+        super::store_path(Some("elsewhere.db".into())),
+        std::path::PathBuf::from("elsewhere.db")
+    );
+    let path = std::env::temp_dir().join(format!("sift-open-{}.db", std::process::id()));
+    let store = super::open_store_at(&path).unwrap();
     assert!(store.accounts().is_ok());
+    drop(store);
+    let _ = std::fs::remove_file(&path);
 }
 
 // ---------- accounts and sync ----------
