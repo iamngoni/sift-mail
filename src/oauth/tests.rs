@@ -479,3 +479,29 @@ fn calendar_permission_is_asked_for_at_consent() {
     assert!(g.scopes.contains("calendar.freebusy"));
     assert!(g.consent_only.is_empty());
 }
+
+#[test]
+fn one_organisation_apps_sign_in_through_their_tenant() {
+    assert!(
+        ms().authorize_url.contains("/common/"),
+        "any organisation by default"
+    );
+    let tenant = |value: &'static str| {
+        move |name: &str| match name {
+            MS_TENANT => Some(value.to_owned()),
+            other => settings(other),
+        }
+    };
+    let own =
+        OAuthConfig::for_provider_with(Provider::Microsoft365, &tenant(" contoso.com ")).unwrap();
+    assert_eq!(
+        own.authorize_url,
+        "https://login.microsoftonline.com/contoso.com/oauth2/v2.0/authorize"
+    );
+    assert_eq!(
+        own.token_url,
+        "https://login.microsoftonline.com/contoso.com/oauth2/v2.0/token"
+    );
+    let bad = OAuthConfig::for_provider_with(Provider::Microsoft365, &tenant("evil.com/x?y"));
+    assert!(bad.unwrap_err().to_string().contains(MS_TENANT));
+}
