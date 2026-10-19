@@ -162,7 +162,11 @@ fn the_palette_searches_mail_and_runs_commands(cx: &mut TestAppContext) {
     typing(cx, handle, "zzzz");
     assert!(read(cx, &view, SiftApp::palette_labels).is_empty());
     press(cx, handle, &["enter", "secondary-k"]);
-    assert_eq!(overlay(cx, &view), None, "the palette shortcut closes it again");
+    assert_eq!(
+        overlay(cx, &view),
+        None,
+        "the palette shortcut closes it again"
+    );
 
     click(cx, handle, "open-palette");
     click(cx, handle, ("palette-item", 0usize));

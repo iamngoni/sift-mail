@@ -9,7 +9,8 @@
 //! Rendering lives in [`super::calendar_view`].
 
 use chrono::{
-    DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone as _, Timelike as _, Utc,
+    DateTime, Datelike as _, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone as _,
+    Timelike as _, Utc,
 };
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::{AppContext as _, Context, Entity, Focusable as _, Window};
@@ -488,11 +489,18 @@ impl SiftApp {
                 }
                 all
             });
+        // At the weekend this week's working days are over, so look ahead.
+        let weekend = today.weekday().num_days_from_monday() >= 5;
+        let week = if weekend {
+            request.week.max(1)
+        } else {
+            request.week
+        };
         let days: Vec<NaiveDate> = match request.day {
             Some(day) => vec![day],
-            None => schedule::work_week(today, request.week).to_vec(),
+            None => schedule::work_week(today, week).to_vec(),
         };
-        let when = match (request.day, request.week) {
+        let when = match (request.day, week) {
             (Some(day), _) => day.format("%A").to_string(),
             (None, 1) => "Next week".into(),
             _ => "This week".into(),
@@ -561,6 +569,9 @@ impl SiftApp {
                                 })
                                 .collect(),
                         ),
+                        // These reasons are written for people; drop the
+                        // "server returned an error" framing around them.
+                        Err(crate::sync::imap::SyncError::Protocol(why)) => Others::Failed(why),
                         Err(error) => Others::Failed(error.to_string()),
                     };
                 }

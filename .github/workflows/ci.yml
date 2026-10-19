@@ -58,7 +58,14 @@ jobs:
           pkgs="build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev"
           missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
           if [ -n "$missing" ]; then
-            sudo=$(command -v sudo || true)
+            if [ "$(id -u)" = 0 ]; then
+              sudo=""
+            elif sudo -n true 2>/dev/null; then
+              sudo=sudo
+            else
+              echo "::error::This runner can't install packages (no root, no sudo). Add them to the runner image: apt-get install -y" $missing
+              exit 1
+            fi
             $sudo apt-get update -qq
             $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing
           fi
@@ -104,7 +111,14 @@ jobs:
           pkgs="build-essential pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libx11-xcb-dev libxcb1-dev libssl-dev libzstd-dev"
           missing=$(for p in $pkgs; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
           if [ -n "$missing" ]; then
-            sudo=$(command -v sudo || true)
+            if [ "$(id -u)" = 0 ]; then
+              sudo=""
+            elif sudo -n true 2>/dev/null; then
+              sudo=sudo
+            else
+              echo "::error::This runner can't install packages (no root, no sudo). Add them to the runner image: apt-get install -y" $missing
+              exit 1
+            fi
             $sudo apt-get update -qq
             $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing
           fi
